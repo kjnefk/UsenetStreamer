@@ -191,6 +191,7 @@
               </div>
               <span class="field-hint">Select keys in your preferred order. First selected key has highest priority.</span>
               <span class="field-hint" data-sort-order-current></span>
+              <p class="warning hidden" data-language-priority-warning>⚠️ You've selected Preferred Languages but Language is not the highest priority in Sorting Priority. Language preferences will be overridden by higher-priority keys. Move Language to the top to make it your primary sort key.</p>
             </div>
             <div class="language-multiselect wide-field" data-language-selector>
               <span class="field-label">Preferred Languages</span>
@@ -469,14 +470,21 @@ health'></textarea>
             <label>Series Category
               <input name="NZBDAV_CATEGORY_SERIES" type="text" placeholder="Tv" />
             </label>
-            <label>Completed Catalog Items
-              <input name="NZBDAV_HISTORY_CATALOG_LIMIT" type="number" min="0" max="200" placeholder="100" />
-              <span class="field-hint">Show N number of latest completed NZBs in the Stremio catalog (0 = off).</span>
-            </label>
           </div>
           <div class="inline-actions">
             <button type="button" class="secondary" data-test="nzbdav">Test Connection</button>
             <span class="status-message" data-test-status="nzbdav"></span>
+          </div>
+        </section>
+
+        <section class="group" id="stremioCatalogGroup">
+          <h3>Stremio Catalog</h3>
+          <p class="hint">Adds a "Completed NZBs" catalog inside Stremio so you can browse and replay items already downloaded to NZBDav. Titles and posters are enriched via TMDb when configured.</p>
+          <div class="field-grid">
+            <label>Completed Catalog Items
+              <input name="NZBDAV_HISTORY_CATALOG_LIMIT" type="number" min="0" max="200" placeholder="100" />
+              <span class="field-hint">Number of latest completed NZBs to show in the Stremio catalog (0 = disable the catalog).</span>
+            </label>
           </div>
         </section>
 
@@ -663,6 +671,7 @@ health'></textarea>
               <span class="field-hint">"English only" keeps TMDb searches in English unless you explicitly add languages below. "English + regional" also adds the title in its original language.</span>
             </label>
           </div>
+          <p class="warning hidden" data-tmdb-strict-id-warning>⚠️ You're set up to fetch regional or additional language titles from TMDb, but Strict ID Matching Only is enabled in the Indexer Manager section. Strict ID mode skips all text searches, so these localized titles will not be used. Disable Strict ID Matching to benefit from localized title searches.</p>
           <div class="tmdb-language-block language-multiselect wide-field" data-tmdb-language-selector>
             <div class="language-header">
               <span class="field-label">Additional Languages</span>

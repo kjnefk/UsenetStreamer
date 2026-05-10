@@ -291,6 +291,7 @@
   function syncLanguageHiddenInput() {
     if (!languageHiddenInput) return;
     languageHiddenInput.value = getSelectedLanguages().join(',');
+    syncConfigWarnings();
   }
 
   function applyLanguageSelectionsFromHidden() {
@@ -872,6 +873,7 @@
       syncStreamingModeControls();
       syncManagerControls();
       syncNewznabControls();
+      syncConfigWarnings();
       configSection.classList.remove('hidden');
       updateManifestLink(data.manifestUrl || '');
       runtimeEnvPath = data.runtimeEnvPath || null;
@@ -1136,6 +1138,29 @@
     sortOrderCurrentHint.textContent = activeSortOrder.length > 0
       ? `Current sorting: ${label}`
       : `Current sorting (default): ${label}`;
+    syncConfigWarnings();
+  }
+
+  function syncConfigWarnings() {
+    const langWarning = configForm.querySelector('[data-language-priority-warning]');
+    if (langWarning) {
+      const hasPreferredLanguage = languageHiddenInput && (languageHiddenInput.value || '').trim().length > 0;
+      const effective = activeSortOrder.length > 0 ? activeSortOrder : getDefaultSortOrder();
+      const languageIsTop = effective[0] === 'language';
+      langWarning.classList.toggle('hidden', !(hasPreferredLanguage && !languageIsTop));
+    }
+
+    const tmdbWarning = configForm.querySelector('[data-tmdb-strict-id-warning]');
+    if (tmdbWarning) {
+      const tmdbModeSelect = configForm.querySelector('select[name="TMDB_SEARCH_MODE"]');
+      const strictIdCheckbox = configForm.querySelector('input[name="INDEXER_MANAGER_STRICT_ID_MATCH"]');
+      const isRegional = tmdbModeSelect?.value === 'english_and_regional';
+      const hasAdditionalTmdbLanguages = tmdbLanguageHiddenInput
+        && (tmdbLanguageHiddenInput.value || '').trim().length > 0;
+      const isStrict = Boolean(strictIdCheckbox?.checked);
+      const wantsLocalizedTitles = isRegional || hasAdditionalTmdbLanguages;
+      tmdbWarning.classList.toggle('hidden', !(wantsLocalizedTitles && isStrict));
+    }
   }
 
   function syncManagerControls() {
@@ -1241,6 +1266,7 @@
   function syncTmdbLanguageHiddenInput() {
     if (!tmdbLanguageHiddenInput) return;
     tmdbLanguageHiddenInput.value = getSelectedTmdbLanguages().join(',');
+    syncConfigWarnings();
   }
 
   function applyTmdbLanguageSelectionsFromHidden() {
@@ -1464,6 +1490,15 @@
       syncTmdbLanguageControls();
       syncSaveGuard();
     });
+  }
+
+  const tmdbModeSelectEl = configForm.querySelector('select[name="TMDB_SEARCH_MODE"]');
+  if (tmdbModeSelectEl) {
+    tmdbModeSelectEl.addEventListener('change', syncConfigWarnings);
+  }
+  const strictIdCheckboxEl = configForm.querySelector('input[name="INDEXER_MANAGER_STRICT_ID_MATCH"]');
+  if (strictIdCheckboxEl) {
+    strictIdCheckboxEl.addEventListener('change', syncConfigWarnings);
   }
 
   if (easynewsToggle) {
