@@ -98,7 +98,7 @@
         </section>
 
         <section class="group" id="newznabGroup">
-          <h3>Direct Newznab Indexers (Optional)</h3>
+          <h3>Direct Newznab Indexers</h3>
           <p class="hint">Add one or more direct Newznab endpoints. Enable them to search alongside your manager (or run manager-free), test each row, and reorder to control priority.</p>
           <div class="newznab-preset-bar">
             <label>Preset
@@ -157,7 +157,7 @@
               <input name="EASYNEWS_USERNAME" type="text" autocomplete="username" />
             </label>
             <label>Easynews Password
-              <input name="EASYNEWS_PASSWORD" type="password" autocomplete="current-password" />
+              <input name="EASYNEWS_PASSWORD" type="password" autocomplete="new-password" />
             </label>
             <label class="checkbox">
               <input name="EASYNEWS_TREAT_AS_INDEXER" type="checkbox" />
@@ -173,8 +173,10 @@
         <section class="group">
           <h3>Result Sorting &amp; Filters</h3>
           <div class="field-grid">
-            <div class="sort-order-builder wide-field" data-sort-order-builder>
-              <span class="field-label">Sorting Priority (optional)</span>
+            <div class="sort-order-builder wide-field" data-sort-order-builder="global">
+              <span class="field-label">Sorting Priority — Global</span>
+              <span class="field-hint">The default sort applied to all content. Movie, Series, and Anime tabs below can each define their own override.</span>
+              <span class="field-hint sort-order-summary" data-sort-order-current></span>
               <input type="hidden" name="NZB_SORT_ORDER" data-sort-order-hidden />
               <div class="sort-order-grid">
                 <label class="checkbox"><input type="checkbox" value="language" data-sort-order-option /> <span>Language</span> <span class="sort-order-index" data-sort-order-index></span></label>
@@ -185,78 +187,192 @@
                 <label class="checkbox"><input type="checkbox" value="encode" data-sort-order-option /> <span>Encode</span> <span class="sort-order-index" data-sort-order-index></span></label>
                 <label class="checkbox"><input type="checkbox" value="visual_tag" data-sort-order-option /> <span>Visual Tag</span> <span class="sort-order-index" data-sort-order-index></span></label>
                 <label class="checkbox"><input type="checkbox" value="audio_tag" data-sort-order-option /> <span>Audio Tag</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                <label class="checkbox"><input type="checkbox" value="audio_channel" data-sort-order-option /> <span>Audio Channel</span> <span class="sort-order-index" data-sort-order-index></span></label>
                 <label class="checkbox"><input type="checkbox" value="keyword" data-sort-order-option /> <span>Keyword</span> <span class="sort-order-index" data-sort-order-index></span></label>
-                <label class="checkbox"><input type="checkbox" value="date" data-sort-order-option /> <span>Date (newest first)</span> <span class="sort-order-index" data-sort-order-index></span></label>
-                <label class="checkbox"><input type="checkbox" value="files" data-sort-order-option /> <span>File Count (fewest first)</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                <label class="checkbox"><input type="checkbox" value="date" data-sort-order-option /> <span>Date</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                <label class="checkbox"><input type="checkbox" value="files" data-sort-order-option /> <span>File Count</span> <span class="sort-order-index" data-sort-order-index></span></label>
               </div>
-              <span class="field-hint">Select keys in your preferred order. First selected key has highest priority.</span>
-              <span class="field-hint" data-sort-order-current></span>
-              <p class="warning hidden" data-language-priority-warning>⚠️ You've selected Preferred Languages but Language is not the highest priority in Sorting Priority. Language preferences will be overridden by higher-priority keys. Move Language to the top to make it your primary sort key.</p>
             </div>
+
+            <details class="sort-override-card wide-field" data-sort-override="movies">
+              <summary>Movies override <span class="sort-override-fallback-hint">(falls back to Global when empty)</span></summary>
+              <div class="sort-order-builder" data-sort-order-builder="movies">
+                <span class="field-hint sort-order-summary" data-sort-order-current></span>
+                <input type="hidden" name="NZB_SORT_ORDER_MOVIES" data-sort-order-hidden />
+                <div class="sort-order-grid">
+                  <label class="checkbox"><input type="checkbox" value="language" data-sort-order-option /> <span>Language</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="release_group" data-sort-order-option /> <span>Release Group</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="size" data-sort-order-option /> <span>Size</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="resolution" data-sort-order-option /> <span>Resolution</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="quality" data-sort-order-option /> <span>Quality</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="encode" data-sort-order-option /> <span>Encode</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="visual_tag" data-sort-order-option /> <span>Visual Tag</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="audio_tag" data-sort-order-option /> <span>Audio Tag</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="audio_channel" data-sort-order-option /> <span>Audio Channel</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="keyword" data-sort-order-option /> <span>Keyword</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                    <label class="checkbox"><input type="checkbox" value="date" data-sort-order-option /> <span>Date</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="files" data-sort-order-option /> <span>File Count</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                </div>
+              </div>
+            </details>
+
+            <details class="sort-override-card wide-field" data-sort-override="series">
+              <summary>Series override <span class="sort-override-fallback-hint">(falls back to Global when empty)</span></summary>
+              <div class="sort-order-builder" data-sort-order-builder="series">
+                <span class="field-hint sort-order-summary" data-sort-order-current></span>
+                <input type="hidden" name="NZB_SORT_ORDER_SERIES" data-sort-order-hidden />
+                <div class="sort-order-grid">
+                  <label class="checkbox"><input type="checkbox" value="language" data-sort-order-option /> <span>Language</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="release_group" data-sort-order-option /> <span>Release Group</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="size" data-sort-order-option /> <span>Size</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="resolution" data-sort-order-option /> <span>Resolution</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="quality" data-sort-order-option /> <span>Quality</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="encode" data-sort-order-option /> <span>Encode</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="visual_tag" data-sort-order-option /> <span>Visual Tag</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="audio_tag" data-sort-order-option /> <span>Audio Tag</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="audio_channel" data-sort-order-option /> <span>Audio Channel</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="keyword" data-sort-order-option /> <span>Keyword</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                    <label class="checkbox"><input type="checkbox" value="date" data-sort-order-option /> <span>Date</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="files" data-sort-order-option /> <span>File Count</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                </div>
+              </div>
+            </details>
+
+            <details class="sort-override-card wide-field" data-sort-override="anime">
+              <summary>Anime override <span class="sort-override-fallback-hint">(falls back to Global when empty, used for Kitsu/MAL IDs)</span></summary>
+              <div class="sort-order-builder" data-sort-order-builder="anime">
+                <span class="field-hint sort-order-summary" data-sort-order-current></span>
+                <input type="hidden" name="NZB_SORT_ORDER_ANIME" data-sort-order-hidden />
+                <div class="sort-order-grid">
+                  <label class="checkbox"><input type="checkbox" value="language" data-sort-order-option /> <span>Language</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="release_group" data-sort-order-option /> <span>Release Group</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="size" data-sort-order-option /> <span>Size</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="resolution" data-sort-order-option /> <span>Resolution</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="quality" data-sort-order-option /> <span>Quality</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="encode" data-sort-order-option /> <span>Encode</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="visual_tag" data-sort-order-option /> <span>Visual Tag</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="audio_tag" data-sort-order-option /> <span>Audio Tag</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="audio_channel" data-sort-order-option /> <span>Audio Channel</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="keyword" data-sort-order-option /> <span>Keyword</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                    <label class="checkbox"><input type="checkbox" value="date" data-sort-order-option /> <span>Date</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                  <label class="checkbox"><input type="checkbox" value="files" data-sort-order-option /> <span>File Count</span> <span class="sort-order-index" data-sort-order-index></span></label>
+                </div>
+              </div>
+            </details>
             <div class="language-multiselect wide-field" data-language-selector>
               <span class="field-label">Preferred Languages</span>
+              <span class="field-hint">Order matters — first language ticked is top priority. The number badge next to each ticked option shows its position. Untick to remove and shift the rest up.</span>
               <input type="hidden" name="NZB_PREFERRED_LANGUAGE" data-language-hidden />
               <input type="text" class="language-search" placeholder="Search languages..." data-search-target="nzb" />
               <div class="language-checkbox-grid">
+                <!-- Meta-language tokens: describe a property of the release (audio
+                     tracks, dubbed, matches the title's original-production language)
+                     rather than a real language. Listed first so they're easy to find. -->
+                <label class="checkbox meta-language-option" title="Audio matches the title's original-production language (e.g. Korean audio on a Korean film)"><input type="checkbox" value="Original" data-language-option /> <span>Original</span></label>
+                <label class="checkbox meta-language-option" title="Release has 3 or more audio tracks"><input type="checkbox" value="Multi" data-language-option /> <span>Multi</span></label>
+                <label class="checkbox meta-language-option" title="Release has exactly 2 audio tracks"><input type="checkbox" value="Dual Audio" data-language-option /> <span>Dual Audio</span></label>
+                <label class="checkbox meta-language-option" title="Release flagged as dubbed (audio is not the original language)"><input type="checkbox" value="Dubbed" data-language-option /> <span>Dubbed</span></label>
+                <label class="checkbox meta-language-option" title="No language information detected"><input type="checkbox" value="Unknown" data-language-option /> <span>Unknown</span></label>
+
                 <label class="checkbox"><input type="checkbox" value="English" data-language-option /> <span>English</span></label>
-                <label class="checkbox"><input type="checkbox" value="Tamil" data-language-option /> <span>Tamil</span></label>
+                <label class="checkbox"><input type="checkbox" value="Spanish" data-language-option /> <span>Spanish</span></label>
+                <label class="checkbox"><input type="checkbox" value="French" data-language-option /> <span>French</span></label>
+                <label class="checkbox"><input type="checkbox" value="German" data-language-option /> <span>German</span></label>
+                <label class="checkbox"><input type="checkbox" value="Italian" data-language-option /> <span>Italian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Portuguese" data-language-option /> <span>Portuguese</span></label>
+                <label class="checkbox"><input type="checkbox" value="Latino" data-language-option /> <span>Latino</span></label>
+                <label class="checkbox"><input type="checkbox" value="Dutch" data-language-option /> <span>Dutch</span></label>
+                <label class="checkbox"><input type="checkbox" value="Catalan" data-language-option /> <span>Catalan</span></label>
+                <label class="checkbox"><input type="checkbox" value="Basque" data-language-option /> <span>Basque</span></label>
+                <label class="checkbox"><input type="checkbox" value="Galician" data-language-option /> <span>Galician</span></label>
+                <label class="checkbox"><input type="checkbox" value="Welsh" data-language-option /> <span>Welsh</span></label>
+                <label class="checkbox"><input type="checkbox" value="Irish" data-language-option /> <span>Irish</span></label>
+
                 <label class="checkbox"><input type="checkbox" value="Hindi" data-language-option /> <span>Hindi</span></label>
+                <label class="checkbox"><input type="checkbox" value="Tamil" data-language-option /> <span>Tamil</span></label>
+                <label class="checkbox"><input type="checkbox" value="Telugu" data-language-option /> <span>Telugu</span></label>
                 <label class="checkbox"><input type="checkbox" value="Malayalam" data-language-option /> <span>Malayalam</span></label>
                 <label class="checkbox"><input type="checkbox" value="Kannada" data-language-option /> <span>Kannada</span></label>
-                <label class="checkbox"><input type="checkbox" value="Telugu" data-language-option /> <span>Telugu</span></label>
-                <label class="checkbox"><input type="checkbox" value="Chinese" data-language-option /> <span>Chinese</span></label>
-                <label class="checkbox"><input type="checkbox" value="Russian" data-language-option /> <span>Russian</span></label>
-                <label class="checkbox"><input type="checkbox" value="Arabic" data-language-option /> <span>Arabic</span></label>
-                <label class="checkbox"><input type="checkbox" value="Japanese" data-language-option /> <span>Japanese</span></label>
-                <label class="checkbox"><input type="checkbox" value="Korean" data-language-option /> <span>Korean</span></label>
-                <label class="checkbox"><input type="checkbox" value="Taiwanese" data-language-option /> <span>Taiwanese</span></label>
-                <label class="checkbox"><input type="checkbox" value="Latino" data-language-option /> <span>Latino</span></label>
-                <label class="checkbox"><input type="checkbox" value="French" data-language-option /> <span>French</span></label>
-                <label class="checkbox"><input type="checkbox" value="Spanish" data-language-option /> <span>Spanish</span></label>
-                <label class="checkbox"><input type="checkbox" value="Portuguese" data-language-option /> <span>Portuguese</span></label>
-                <label class="checkbox"><input type="checkbox" value="Italian" data-language-option /> <span>Italian</span></label>
-                <label class="checkbox"><input type="checkbox" value="German" data-language-option /> <span>German</span></label>
-                <label class="checkbox"><input type="checkbox" value="Ukrainian" data-language-option /> <span>Ukrainian</span></label>
-                <label class="checkbox"><input type="checkbox" value="Polish" data-language-option /> <span>Polish</span></label>
-                <label class="checkbox"><input type="checkbox" value="Czech" data-language-option /> <span>Czech</span></label>
-                <label class="checkbox"><input type="checkbox" value="Thai" data-language-option /> <span>Thai</span></label>
-                <label class="checkbox"><input type="checkbox" value="Indonesian" data-language-option /> <span>Indonesian</span></label>
-                <label class="checkbox"><input type="checkbox" value="Vietnamese" data-language-option /> <span>Vietnamese</span></label>
-                <label class="checkbox"><input type="checkbox" value="Dutch" data-language-option /> <span>Dutch</span></label>
                 <label class="checkbox"><input type="checkbox" value="Bengali" data-language-option /> <span>Bengali</span></label>
-                <label class="checkbox"><input type="checkbox" value="Turkish" data-language-option /> <span>Turkish</span></label>
-                <label class="checkbox"><input type="checkbox" value="Greek" data-language-option /> <span>Greek</span></label>
-                <label class="checkbox"><input type="checkbox" value="Swedish" data-language-option /> <span>Swedish</span></label>
-                <label class="checkbox"><input type="checkbox" value="Romanian" data-language-option /> <span>Romanian</span></label>
-                <label class="checkbox"><input type="checkbox" value="Hungarian" data-language-option /> <span>Hungarian</span></label>
-                <label class="checkbox"><input type="checkbox" value="Finnish" data-language-option /> <span>Finnish</span></label>
-                <label class="checkbox"><input type="checkbox" value="Norwegian" data-language-option /> <span>Norwegian</span></label>
-                <label class="checkbox"><input type="checkbox" value="Danish" data-language-option /> <span>Danish</span></label>
-                <label class="checkbox"><input type="checkbox" value="Hebrew" data-language-option /> <span>Hebrew</span></label>
-                <label class="checkbox"><input type="checkbox" value="Lithuanian" data-language-option /> <span>Lithuanian</span></label>
                 <label class="checkbox"><input type="checkbox" value="Punjabi" data-language-option /> <span>Punjabi</span></label>
                 <label class="checkbox"><input type="checkbox" value="Marathi" data-language-option /> <span>Marathi</span></label>
                 <label class="checkbox"><input type="checkbox" value="Gujarati" data-language-option /> <span>Gujarati</span></label>
                 <label class="checkbox"><input type="checkbox" value="Bhojpuri" data-language-option /> <span>Bhojpuri</span></label>
                 <label class="checkbox"><input type="checkbox" value="Nepali" data-language-option /> <span>Nepali</span></label>
                 <label class="checkbox"><input type="checkbox" value="Urdu" data-language-option /> <span>Urdu</span></label>
+                <label class="checkbox"><input type="checkbox" value="Sinhala" data-language-option /> <span>Sinhala</span></label>
+
+                <label class="checkbox"><input type="checkbox" value="Chinese" data-language-option /> <span>Chinese</span></label>
+                <label class="checkbox"><input type="checkbox" value="Japanese" data-language-option /> <span>Japanese</span></label>
+                <label class="checkbox"><input type="checkbox" value="Korean" data-language-option /> <span>Korean</span></label>
+                <label class="checkbox"><input type="checkbox" value="Taiwanese" data-language-option /> <span>Taiwanese</span></label>
+                <label class="checkbox"><input type="checkbox" value="Mongolian" data-language-option /> <span>Mongolian</span></label>
+
+                <label class="checkbox"><input type="checkbox" value="Thai" data-language-option /> <span>Thai</span></label>
+                <label class="checkbox"><input type="checkbox" value="Indonesian" data-language-option /> <span>Indonesian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Vietnamese" data-language-option /> <span>Vietnamese</span></label>
                 <label class="checkbox"><input type="checkbox" value="Tagalog" data-language-option /> <span>Tagalog</span></label>
                 <label class="checkbox"><input type="checkbox" value="Filipino" data-language-option /> <span>Filipino</span></label>
                 <label class="checkbox"><input type="checkbox" value="Malay" data-language-option /> <span>Malay</span></label>
-                <label class="checkbox"><input type="checkbox" value="Mongolian" data-language-option /> <span>Mongolian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Khmer" data-language-option /> <span>Khmer</span></label>
+                <label class="checkbox"><input type="checkbox" value="Lao" data-language-option /> <span>Lao</span></label>
+                <label class="checkbox"><input type="checkbox" value="Burmese" data-language-option /> <span>Burmese</span></label>
+
+                <label class="checkbox"><input type="checkbox" value="Arabic" data-language-option /> <span>Arabic</span></label>
+                <label class="checkbox"><input type="checkbox" value="Hebrew" data-language-option /> <span>Hebrew</span></label>
+                <label class="checkbox"><input type="checkbox" value="Persian" data-language-option /> <span>Persian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Pashto" data-language-option /> <span>Pashto</span></label>
+                <label class="checkbox"><input type="checkbox" value="Turkish" data-language-option /> <span>Turkish</span></label>
+                <label class="checkbox"><input type="checkbox" value="Azerbaijani" data-language-option /> <span>Azerbaijani</span></label>
+                <label class="checkbox"><input type="checkbox" value="Kazakh" data-language-option /> <span>Kazakh</span></label>
+                <label class="checkbox"><input type="checkbox" value="Uzbek" data-language-option /> <span>Uzbek</span></label>
                 <label class="checkbox"><input type="checkbox" value="Armenian" data-language-option /> <span>Armenian</span></label>
                 <label class="checkbox"><input type="checkbox" value="Georgian" data-language-option /> <span>Georgian</span></label>
+
+                <label class="checkbox"><input type="checkbox" value="Russian" data-language-option /> <span>Russian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Ukrainian" data-language-option /> <span>Ukrainian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Polish" data-language-option /> <span>Polish</span></label>
+                <label class="checkbox"><input type="checkbox" value="Czech" data-language-option /> <span>Czech</span></label>
+                <label class="checkbox"><input type="checkbox" value="Slovak" data-language-option /> <span>Slovak</span></label>
+                <label class="checkbox"><input type="checkbox" value="Slovenian" data-language-option /> <span>Slovenian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Croatian" data-language-option /> <span>Croatian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Serbian" data-language-option /> <span>Serbian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Bulgarian" data-language-option /> <span>Bulgarian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Macedonian" data-language-option /> <span>Macedonian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Belarusian" data-language-option /> <span>Belarusian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Albanian" data-language-option /> <span>Albanian</span></label>
+
+                <label class="checkbox"><input type="checkbox" value="Swedish" data-language-option /> <span>Swedish</span></label>
+                <label class="checkbox"><input type="checkbox" value="Norwegian" data-language-option /> <span>Norwegian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Danish" data-language-option /> <span>Danish</span></label>
+                <label class="checkbox"><input type="checkbox" value="Finnish" data-language-option /> <span>Finnish</span></label>
+                <label class="checkbox"><input type="checkbox" value="Icelandic" data-language-option /> <span>Icelandic</span></label>
+                <label class="checkbox"><input type="checkbox" value="Estonian" data-language-option /> <span>Estonian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Latvian" data-language-option /> <span>Latvian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Lithuanian" data-language-option /> <span>Lithuanian</span></label>
+
+                <label class="checkbox"><input type="checkbox" value="Greek" data-language-option /> <span>Greek</span></label>
+                <label class="checkbox"><input type="checkbox" value="Romanian" data-language-option /> <span>Romanian</span></label>
+                <label class="checkbox"><input type="checkbox" value="Hungarian" data-language-option /> <span>Hungarian</span></label>
+
+                <label class="checkbox"><input type="checkbox" value="Afrikaans" data-language-option /> <span>Afrikaans</span></label>
+                <label class="checkbox"><input type="checkbox" value="Swahili" data-language-option /> <span>Swahili</span></label>
+                <label class="checkbox"><input type="checkbox" value="Amharic" data-language-option /> <span>Amharic</span></label>
+                <label class="checkbox"><input type="checkbox" value="Yoruba" data-language-option /> <span>Yoruba</span></label>
+                <label class="checkbox"><input type="checkbox" value="Zulu" data-language-option /> <span>Zulu</span></label>
               </div>
+              <p class="notice hidden" data-language-priority-warning>⚠️ You've selected Preferred Languages but Language is not the highest priority in Sorting Priority. Language preferences will be overridden by higher-priority keys. Move Language to the top to make it your primary sort key.</p>
             </div>
-            <label>Max File Size (GB)
-              <input name="NZB_MAX_RESULT_SIZE_GB" type="number" min="0" step="0.1" placeholder="30" />
-              <span class="field-hint">Defaults to 30 GB. Set 0 for no cap; larger releases are skipped before health checks.</span>
-            </label>
-            <label class="checkbox">
-              <input name="NZB_DEDUP_ENABLED" type="checkbox" checked />
-              <span>
-                Hide duplicate releases
-                <span class="field-hint">Collapses duplicates when normalized title and Usenet group match within the publish window. Keeps preferred result by paid indexer, then fewer files. Disable to inspect every result.</span>
+            <label class="wide-field">Duplicate handling
+              <select name="NZB_DEDUP_MODE">
+                <option value="standard" selected>Standard — title + Usenet group + publish window (recommended)</option>
+                <option value="strict">Strict — title only (collapses more aggressively)</option>
+                <option value="off">Off — show every result</option>
+              </select>
+              <span class="field-hint">
+                <strong>Standard</strong> keeps the same release reposted to different Usenet groups as separate streams (matches the legacy "Hide duplicates" behavior).
+                <strong>Strict</strong> collapses any results sharing the normalized title — fewer streams, but you lose visibility into reposts.
+                <strong>Off</strong> shows everything raw. In all dedupe modes, paid-indexer results are preferred over free, then fewer files wins.
               </span>
             </label>
             <label class="checkbox">
@@ -326,74 +442,155 @@
           </div>
           <div class="advanced-filters">
             <div class="advanced-filters-header">
-              <span>Release Exclusions</span>
-              <span class="field-hint">Comma-separated list of items to exclude from results. Click "Show Examples" for available options.</span>
+              <span>Preferences (used by Sorting Priority)</span>
+              <span class="field-hint">These lists feed the matching sort key — first item = top priority. Leave blank to ignore that dimension.</span>
             </div>
             <div class="field-grid">
-              <label class="wide-field">Exclude Releases Containing (comma-separated)
-                <textarea name="NZB_RELEASE_EXCLUSIONS" rows="3" placeholder="e.g. cam,ts,hardcoded,yify"></textarea>
-                <span class="field-hint">Add codecs, sources, audio, flags, or groups to exclude. Case-insensitive.</span>
-              </label>
-            </div>
-            <details class="exclusion-examples">
-              <summary>Show Examples & Available Options</summary>
-              <div class="examples-grid">
-                <div class="example-category">
-                  <h4>Video Codecs</h4>
-                  <code>x264, x265, h264, hevc, xvid, mpeg2, vp8, vp9, av1</code>
-                </div>
-                <div class="example-category">
-                  <h4>Sources (Quality)</h4>
-                  <code>cam, telesync, telecine, scr, dvdscr, dvdrip, hdtv, pdtv, web-dl, webrip, webcap, bdrip, brrip, bluray, remux, uhdrip, hdrip, vhsrip, sdtv, tvrip, vodr, workprint</code>
-                </div>
-                <div class="example-category">
-                  <h4>Audio Codecs</h4>
-                  <code>aac, ac3, eac3, mp3, flac, truehd, atmos, dts lossy, dts lossless, dd</code>
-                </div>
-                <div class="example-category">
-                  <h4>Visual Tags</h4>
-                  <code>hdr, hdr10, hdr10+, dv, sdr, 3d, 10bit, 8bit</code>
-                </div>
-                <div class="example-category">
-                  <h4>Flags</h4>
-                  <code>hardcoded, proper, repack, hdr, extended, remastered, unrated, remux, retail</code>
-                </div>
-                <div class="example-category">
-                  <h4>Release Groups</h4>
-                  <code>yify, rarbg, evo, eztv</code>
-                  <p class="hint">Use actual group names from releases</p>
-                </div>
-              </div>
-            </details>
-          </div>
-          <div class="advanced-filters">
-            <div class="advanced-filters-header">
-              <span>Release Preferences (Optional)</span>
-              <span class="field-hint">These preferences are used by Sorting Priority when the matching key is present.</span>
-            </div>
-            <div class="field-grid">
-              <label>Preferred Quality Source (optional)
+              <label>Preferred Quality Source
                 <input name="NZB_PREFERRED_QUALITIES" type="text" placeholder="e.g. remux,bluray,web-dl" />
-                <span class="field-hint">Quality here means source/release type (e.g. REMUX, BluRay, WEB-DL), not resolution.</span>
+                <span class="field-hint">Source/release type (e.g. REMUX, BluRay, WEB-DL), not resolution.</span>
               </label>
-              <label>Preferred Encodes (optional)
+              <label>Preferred Encodes
                 <input name="NZB_PREFERRED_ENCODES" type="text" placeholder="e.g. hevc,avc,x265,x264" />
               </label>
-              <label>Preferred Release Groups (optional)
-                <input name="NZB_PREFERRED_RELEASE_GROUPS" type="text" placeholder="e.g. CtrlHD,FraMeSToR" />
-              </label>
-              <label>Preferred Visual Tags (optional)
+              <label>Preferred Visual Tags
                 <input name="NZB_PREFERRED_VISUAL_TAGS" type="text" placeholder="e.g. dv,hdr10+,hdr" />
               </label>
-              <label>Preferred Audio Tags (optional)
+              <label>Preferred Audio Tags
                 <input name="NZB_PREFERRED_AUDIO_TAGS" type="text" placeholder="e.g. atmos,truehd,dts" />
               </label>
-              <label class="wide-field">Preferred Keywords (optional)
+              <label>Preferred Audio Channels
+                <input name="NZB_PREFERRED_AUDIO_CHANNELS" type="text" placeholder="e.g. 7.1,5.1,2.0" />
+              </label>
+              <label>Preferred Release Groups
+                <input name="NZB_PREFERRED_RELEASE_GROUPS" type="text" placeholder="e.g. CtrlHD,FraMeSToR" />
+              </label>
+              <label>Preferred Keywords
                 <input name="NZB_PREFERRED_KEYWORDS" type="text" placeholder="e.g. criterion,extended,proper" />
-                <span class="field-hint">Comma-separated title keywords used in custom sorting only.</span>
+                <span class="field-hint">Earlier keyword = higher priority. Tick <code>Keyword</code> in your sort priority above to use this.</span>
+              </label>
+            </div>
+            <details class="option-suggestions">
+              <summary>Show common examples</summary>
+              <p class="option-suggestions-hint">Click a chip to add it to the matching field above. You can still type any custom value directly into the fields.</p>
+              <div class="option-suggestions-grid"
+                   data-suggestions
+                   data-suggestions-categories='[
+                     {"vocab":"qualities","heading":"Sources (Quality)","input":"NZB_PREFERRED_QUALITIES"},
+                     {"vocab":"encodes","heading":"Video Codecs / Encodes","input":"NZB_PREFERRED_ENCODES"},
+                     {"vocab":"visualTags","heading":"Visual Tags","input":"NZB_PREFERRED_VISUAL_TAGS"},
+                     {"vocab":"audioTags","heading":"Audio Codecs","input":"NZB_PREFERRED_AUDIO_TAGS"},
+                     {"vocab":"audioChannels","heading":"Audio Channels","input":"NZB_PREFERRED_AUDIO_CHANNELS"},
+                     {"vocab":"releaseGroups","heading":"Release Groups","input":"NZB_PREFERRED_RELEASE_GROUPS"},
+                     {"vocab":"keywords","heading":"Keywords","input":"NZB_PREFERRED_KEYWORDS"}
+                   ]'></div>
+            </details>
+          </div>
+
+          <div class="advanced-filters">
+            <div class="advanced-filters-header">
+              <span>Exclusions (drop results that match)</span>
+              <span class="field-hint">Results are filtered out before sorting. Comma-separated. All exclusions are case-insensitive.</span>
+            </div>
+            <div class="field-grid">
+              <label>Excluded Qualities
+                <input name="NZB_EXCLUDED_QUALITIES" type="text" placeholder="e.g. CAM,SCR,TS,TC" />
+              </label>
+              <label>Excluded Encodes
+                <input name="NZB_EXCLUDED_ENCODES" type="text" placeholder="e.g. xvid,divx" />
+              </label>
+              <label>Excluded Visual Tags
+                <input name="NZB_EXCLUDED_VISUAL_TAGS" type="text" placeholder="e.g. 3D" />
+              </label>
+              <label>Excluded Audio Tags
+                <input name="NZB_EXCLUDED_AUDIO_TAGS" type="text" placeholder="e.g. AAC,MP3" />
+              </label>
+              <label>Excluded Audio Channels
+                <input name="NZB_EXCLUDED_AUDIO_CHANNELS" type="text" placeholder="e.g. 2.0,mono" />
+              </label>
+              <label>Excluded Release Groups
+                <input name="NZB_EXCLUDED_RELEASE_GROUPS" type="text" placeholder="e.g. YIFY,RARBG" />
+              </label>
+              <label>Excluded Languages
+                <input name="NZB_EXCLUDED_LANGUAGES" type="text" placeholder="e.g. Russian,Hindi" />
+              </label>
+            </div>
+            <details class="option-suggestions">
+              <summary>Show common examples</summary>
+              <p class="option-suggestions-hint">Click a chip to add it to the matching field above. You can still type any custom value directly into the fields.</p>
+              <div class="option-suggestions-grid"
+                   data-suggestions
+                   data-suggestions-categories='[
+                     {"vocab":"qualities","heading":"Sources (Quality)","input":"NZB_EXCLUDED_QUALITIES"},
+                     {"vocab":"encodes","heading":"Video Codecs / Encodes","input":"NZB_EXCLUDED_ENCODES"},
+                     {"vocab":"visualTags","heading":"Visual Tags","input":"NZB_EXCLUDED_VISUAL_TAGS"},
+                     {"vocab":"audioTags","heading":"Audio Codecs","input":"NZB_EXCLUDED_AUDIO_TAGS"},
+                     {"vocab":"audioChannels","heading":"Audio Channels","input":"NZB_EXCLUDED_AUDIO_CHANNELS"},
+                     {"vocab":"releaseGroups","heading":"Release Groups","input":"NZB_EXCLUDED_RELEASE_GROUPS"},
+                     {"vocab":"languages","heading":"Languages","input":"NZB_EXCLUDED_LANGUAGES"}
+                   ]'></div>
+            </details>
+          </div>
+
+          <div class="advanced-filters">
+            <div class="advanced-filters-header">
+              <span>Numeric Limits</span>
+              <span class="field-hint">Hard cutoffs by file size and bitrate. Blank = no limit.</span>
+            </div>
+            <div class="field-grid">
+              <label>Min Size (GB)
+                <input name="NZB_MIN_RESULT_SIZE_GB" type="number" min="0" step="0.1" placeholder="e.g. 1" />
+              </label>
+              <label>Max Size (GB)
+                <input name="NZB_MAX_RESULT_SIZE_GB" type="number" min="0" step="0.1" placeholder="30" />
+                <span class="field-hint">Defaults to 30 GB. Set 0 for no cap.</span>
+              </label>
+              <label>Max Bitrate (Mbps)
+                <input name="NZB_MAX_BITRATE_MBPS" type="number" min="0" step="0.1" placeholder="e.g. 80" />
+                <span class="field-hint">Bitrate is calculated from file size ÷ TMDb runtime, so it only works when TMDb is configured. Streams with unknown bitrate (no TMDb match) are never dropped by this filter.</span>
               </label>
             </div>
           </div>
+
+          <details class="advanced-settings" id="sortImportAdvanced">
+            <summary>Advanced: Import Sort Config &amp; Regex Patterns</summary>
+
+            <div class="advanced-filters" style="margin-top: 1rem;">
+              <div class="advanced-filters-header">
+                <span>Import Sort Config</span>
+                <span class="field-hint">Paste an exported sort/filter config JSON and click <strong>Import &amp; Apply</strong>. We fill in the sorting priority, preferred lists, exclusions, ranges, and Regex tiers above and below with the imported values. Then click <strong>Save Changes</strong>. <a href="help.html#sorting" target="_blank" rel="noopener">Learn more</a></span>
+              </div>
+              <div class="field-grid">
+                <label class="wide-field">Sort Config JSON
+                  <textarea name="NZB_AIO_SORT_CONFIG" id="sortImportConfigTextarea" class="pattern-input" rows="6" placeholder='Open your aggregator addon&#39;s /configure page → Export Settings (enable "Exclude Credentials") → paste the JSON here'></textarea>
+                  <span class="field-hint">We only read <code>sortCriteria</code>, <code>preferred*</code> lists, <code>excluded*</code>/<code>required*</code>/<code>included*</code> filters, and size/bitrate ranges. Everything else is ignored. After import, this textarea may still hold per-type sort data that can't be shown in the basic UI — leave it alone.</span>
+                </label>
+              </div>
+              <div class="inline-actions">
+                <button type="button" class="secondary" id="sortImportPreviewButton">Import &amp; Apply</button>
+                <span class="status-message" id="sortImportStatus"></span>
+              </div>
+              <div class="sort-import-preview hidden" id="sortImportPreview"></div>
+            </div>
+
+            <div class="advanced-filters" style="margin-top: 1rem;">
+              <div class="advanced-filters-header">
+                <span>Regex Patterns</span>
+                <span class="field-hint">Filter and sort streams by regular expressions. Each line is one pattern, matched (case-insensitive) against the filename, release group, and indexer name. Prefix with <code>!</code> to negate a single pattern.</span>
+              </div>
+              <div class="field-grid">
+                <label class="wide-field">Required Regex Patterns
+                  <textarea name="NZB_REQUIRED_REGEX_PATTERNS" id="requiredRegexTextarea" class="pattern-input" rows="3" placeholder='\.REMUX\.&#10;EthEL|FraMeSToR|CtrlHD'></textarea>
+                  <span class="field-hint">A stream is kept only if <strong>at least one</strong> of these patterns matches. Streams with no match are dropped before sort.</span>
+                </label>
+                <label class="wide-field">Excluded Regex Patterns
+                  <textarea name="NZB_EXCLUDED_REGEX_PATTERNS" id="excludedRegexTextarea" class="pattern-input" rows="3" placeholder='YIFY&#10;hardcoded.sub&#10;\.cam\.'></textarea>
+                  <span class="field-hint">A stream is dropped if <strong>any</strong> of these patterns matches.</span>
+                </label>
+              </div>
+            </div>
+
+          </details>
         </section>
 
         <section class="group">
@@ -496,7 +693,7 @@ health'></textarea>
                 <option value="none">No Protection</option>
                 <option value="auto-advance" selected>Auto-Advance Only</option>
                 <option value="health-check">Upfront Health Check</option>
-                <option value="health-check-auto-advance">Upfront Health Check + Auto-Advance (recommended if wrapped in AIO)</option>
+                <option value="health-check-auto-advance">Upfront Health Check + Auto-Advance (recommended if wrapped in an aggregator addon)</option>
                 <option value="smart-play-only">Background Health Check + Smart Play</option>
                 <option value="smart-play">Background Health Check + Smart Play + Auto-Advance (recommended for standalone)</option>
               </select>
@@ -671,7 +868,7 @@ health'></textarea>
               <span class="field-hint">"English only" keeps TMDb searches in English unless you explicitly add languages below. "English + regional" also adds the title in its original language.</span>
             </label>
           </div>
-          <p class="warning hidden" data-tmdb-strict-id-warning>⚠️ You're set up to fetch regional or additional language titles from TMDb, but Strict ID Matching Only is enabled in the Indexer Manager section. Strict ID mode skips all text searches, so these localized titles will not be used. Disable Strict ID Matching to benefit from localized title searches.</p>
+          <p class="notice hidden" data-tmdb-strict-id-warning>⚠️ You're set up to fetch regional or additional language titles from TMDb, but Strict ID Matching Only is enabled in the Indexer Manager section. Strict ID mode skips all text searches, so these localized titles will not be used. Disable Strict ID Matching to benefit from localized title searches.</p>
           <div class="tmdb-language-block language-multiselect wide-field" data-tmdb-language-selector>
             <div class="language-header">
               <span class="field-label">Additional Languages</span>

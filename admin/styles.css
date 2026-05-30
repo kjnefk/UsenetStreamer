@@ -155,6 +155,19 @@ header h1 {
   font-weight: 600;
 }
 
+/* Softer amber notice for advisory messages (config tradeoffs, recommendations).
+   Use this instead of .warning when the situation is not broken — just
+   sub-optimal or worth knowing about. */
+.notice {
+  margin: 0;
+  padding: 1.1rem 1.4rem;
+  border-radius: var(--radius-md);
+  background: rgba(255, 196, 109, 0.1);
+  border: 1px solid rgba(255, 196, 109, 0.35);
+  color: rgba(255, 196, 109, 0.95);
+  font-weight: 500;
+}
+
 .error {
   margin: 0;
   color: var(--danger);
@@ -203,6 +216,12 @@ header h1 {
 }
 
 .field-grid label.wide-field {
+  grid-column: 1 / -1;
+}
+
+/* Any direct child of .field-grid that opts into wide-field spans the row,
+   not just <label> elements (e.g. <details> override cards). */
+.field-grid > .wide-field {
   grid-column: 1 / -1;
 }
 
@@ -693,6 +712,130 @@ button.ghost.danger:hover {
   margin-top: 0.9rem;
 }
 
+/* Per-type sort override collapsibles — share the visual language of
+   .advanced-settings but live inline inside the sort builder grid. */
+.sort-override-card {
+  margin-top: 0.6rem;
+  padding: 0.7rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.02);
+}
+.sort-override-card > summary {
+  cursor: pointer;
+  font-weight: 600;
+  font-size: 0.9rem;
+  color: var(--text-secondary);
+  user-select: none;
+  list-style: none;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+.sort-override-card > summary::before {
+  content: "▶";
+  font-size: 0.7rem;
+  transition: transform 0.15s ease;
+}
+.sort-override-card[open] > summary::before {
+  transform: rotate(90deg);
+}
+.sort-override-card > summary::-webkit-details-marker {
+  display: none;
+}
+.sort-override-fallback-hint {
+  font-weight: 400;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+}
+.sort-override-card > .sort-order-builder {
+  margin-top: 0.8rem;
+}
+
+/* One grouped chip-picker panel per section (Preferences / Exclusions).
+   Inside, each category is a column with a heading and a row of chip buttons.
+   Clicking a chip toggles its value in the field named by data-input-name. */
+.option-suggestions {
+  margin-top: 1rem;
+}
+.option-suggestions > summary {
+  cursor: pointer;
+  user-select: none;
+  list-style: none;
+  font-size: 0.9rem;
+  font-weight: 600;
+  color: var(--accent, #4ec9ff);
+  display: inline-flex;
+  align-items: center;
+  gap: 0.4rem;
+  padding: 0.2rem 0;
+}
+.option-suggestions > summary::before {
+  content: "▶";
+  font-size: 0.7rem;
+  transition: transform 0.15s ease;
+}
+.option-suggestions[open] > summary::before {
+  transform: rotate(90deg);
+}
+.option-suggestions > summary::-webkit-details-marker {
+  display: none;
+}
+.option-suggestions-hint {
+  margin: 0.5rem 0 0.7rem;
+  font-size: 0.82rem;
+  font-weight: 400;
+  color: var(--text-muted);
+  line-height: 1.5;
+}
+.option-suggestions-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 1.2rem 1.8rem;
+  padding: 1rem 1.1rem;
+  border-radius: var(--radius-md);
+  border: 1px solid rgba(86, 110, 135, 0.28);
+  background: rgba(8, 16, 26, 0.6);
+}
+.option-category > h4 {
+  margin: 0 0 0.55rem;
+  font-size: 0.78rem;
+  font-weight: 700;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  color: var(--text-secondary);
+}
+.option-chip-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+}
+.option-chip {
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  font-weight: 500;
+  color: var(--text-secondary);
+  background: rgba(20, 32, 48, 0.85);
+  border: 1px solid rgba(86, 110, 135, 0.35);
+  border-radius: 0.35rem;
+  padding: 0.22rem 0.6rem;
+  cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease, border-color 0.12s ease;
+}
+.option-chip:hover {
+  background: rgba(40, 56, 80, 0.95);
+  color: var(--text-primary);
+  border-color: rgba(120, 150, 180, 0.5);
+}
+.option-chip.active {
+  background: var(--accent, #4ec9ff);
+  color: #0a1018;
+  border-color: var(--accent, #4ec9ff);
+}
+.option-chip.active:hover {
+  filter: brightness(1.05);
+}
+
 .newznab-row .field-grid {
   grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
 }
@@ -868,6 +1011,37 @@ button.ghost.danger:hover {
   display: flex;
   align-items: center;
   gap: 0.45rem;
+  padding: 0.3rem 0.4rem;
+  border-radius: 6px;
+  transition: opacity 120ms ease, background 120ms ease;
+}
+
+/* Dim sort keys that aren't currently part of the priority chain. Makes the
+   active items visually pop without the user having to scan for badges. */
+.sort-order-grid .checkbox:has(input[data-sort-order-option]:not(:checked)) {
+  opacity: 0.45;
+}
+.sort-order-grid .checkbox:has(input[data-sort-order-option]:not(:checked)):hover {
+  opacity: 0.8;
+  background: rgba(255, 255, 255, 0.03);
+}
+.sort-order-grid .checkbox:has(input[data-sort-order-option]:checked) {
+  background: rgba(57, 121, 255, 0.07);
+}
+
+/* One-line summary of the current priority chain. Shown above the grid so
+   users don't have to mentally re-thread the numbered badges. */
+.sort-order-summary {
+  display: block;
+  margin-top: 0.2rem;
+  padding: 0.35rem 0.6rem;
+  border-radius: var(--radius-sm);
+  background: rgba(57, 121, 255, 0.06);
+  border: 1px dashed rgba(57, 121, 255, 0.18);
+  font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  font-size: 0.78rem;
+  color: var(--text-secondary);
+  line-height: 1.5;
 }
 
 .sort-order-index {
@@ -925,6 +1099,34 @@ button.ghost.danger:hover {
 
 .language-checkbox-grid .checkbox:hover {
   background: rgba(62, 210, 255, 0.08);
+}
+
+/* Meta-language tokens (Original, Multi, Dual Audio, Dubbed, Unknown) — not
+   actual languages, but describe a release property. Subtle accent border so
+   they stand apart from the real-language entries in the grid. */
+.language-checkbox-grid .meta-language-option {
+  border: 1px dashed rgba(78, 201, 255, 0.45);
+  background: rgba(78, 201, 255, 0.05);
+}
+.language-checkbox-grid .meta-language-option:hover {
+  background: rgba(78, 201, 255, 0.12);
+}
+
+/* Numbered priority badge for the language picker — same visual language as
+   the sort-priority builder badges so users recognize the pattern. */
+.language-checkbox-grid [data-language-priority-badge]:not(:empty) {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.3rem;
+  height: 1.3rem;
+  padding: 0 0.35rem;
+  margin-left: 0.4rem;
+  border-radius: 999px;
+  background: var(--accent, #4ec9ff);
+  color: #0a1018;
+  font-size: 0.72rem;
+  font-weight: 700;
 }
 
 .support-note {
@@ -1258,3 +1460,141 @@ button.ghost.danger:hover {
   white-space: pre-wrap;
   line-height: 1.5;
 }
+
+/* Import warnings (dropped/ignored keys) shown after a sort-config import. */
+.sort-import-warnings {
+  margin-top: 0.9rem;
+  padding: 0.6rem 0.9rem;
+  border-radius: var(--radius-sm);
+  background: rgba(255, 196, 109, 0.1);
+  border: 1px solid rgba(255, 196, 109, 0.35);
+  color: rgba(255, 196, 109, 0.95);
+  font-size: 0.82rem;
+  line-height: 1.5;
+}
+.sort-import-warnings ul {
+  margin: 0.4rem 0 0;
+  padding-left: 1.1rem;
+}
+.sort-import-warnings li {
+  margin-bottom: 0.2rem;
+}
+
+/* Sort config import preview UI */
+.sort-import-preview {
+  margin-top: 0.8rem;
+  padding: 0.9rem 1.1rem;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  background: rgba(255, 255, 255, 0.02);
+  font-size: 0.9rem;
+}
+
+.sort-import-preview h4.compact {
+  margin: 0 0 0.6rem 0;
+  font-size: 0.95rem;
+  color: var(--text-secondary);
+}
+
+.sort-import-preview-grid {
+  display: grid;
+  gap: 0.45rem;
+}
+
+.sort-import-preview-grid > div {
+  line-height: 1.5;
+}
+
+.sort-import-preview-grid code {
+  font-family: ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 0.85rem;
+  background: rgba(255, 255, 255, 0.04);
+  padding: 0.1rem 0.4rem;
+  border-radius: 4px;
+}
+
+/* Sort direction toggle (appears next to each active sort key).
+   Styled as a clearly-clickable pill so it doesn't get mistaken for the
+   checkbox sitting next to it. */
+.sort-direction-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.7em;
+  height: 1.5em;
+  margin-left: 0.45em;
+  padding: 0;
+  border: 1px solid var(--accent-strong, rgba(53, 213, 255, 0.5));
+  border-radius: 999px;
+  background: rgba(53, 213, 255, 0.1);
+  color: var(--text-primary);
+  font-size: 0.85rem;
+  font-weight: 700;
+  line-height: 1;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease, transform 80ms ease;
+}
+
+.sort-direction-toggle:hover {
+  background: rgba(53, 213, 255, 0.25);
+  border-color: var(--accent-strong);
+  color: var(--text-primary);
+}
+
+.sort-direction-toggle:active {
+  transform: scale(0.92);
+}
+
+.sort-direction-toggle[data-direction="asc"] {
+  color: var(--warning);
+  border-color: rgba(255, 196, 109, 0.55);
+  background: rgba(255, 196, 109, 0.12);
+}
+
+.sort-direction-toggle[data-direction="asc"]:hover {
+  background: rgba(255, 196, 109, 0.25);
+}
+
+
+/* Collapsible top-level section headers */
+.section-heading-collapsible {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  cursor: pointer;
+  user-select: none;
+}
+
+.section-collapse-toggle {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 1.8rem;
+  height: 1.8rem;
+  padding: 0;
+  border: 1px solid var(--border-soft);
+  border-radius: 8px;
+  background: rgba(255, 255, 255, 0.04);
+  color: var(--text-secondary);
+  font-size: 0.9rem;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, border-color 120ms ease;
+  flex: 0 0 auto;
+}
+
+.section-collapse-toggle:hover {
+  background: rgba(53, 213, 255, 0.12);
+  border-color: var(--accent-strong);
+  color: var(--text-primary);
+}
+
+/* Hide every child of the section except its first heading when collapsed */
+section.group.section-collapsed > :not(h3) {
+  display: none !important;
+}
+
+section.group.section-collapsed > h3 {
+  margin-bottom: 0;
+}
+

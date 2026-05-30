@@ -303,12 +303,24 @@ async function getDetails(tmdbId, mediaType, language) {
       return null;
     }
 
+    // Runtime: movies give minutes directly via `runtime`; TV gives an array
+    // `episode_run_time` (usually 1 element, sometimes empty for finished
+    // series with variable episode lengths). Take the first value.
+    let runtimeMinutes = null;
+    if (Number.isFinite(data.runtime) && data.runtime > 0) {
+      runtimeMinutes = data.runtime;
+    } else if (Array.isArray(data.episode_run_time) && data.episode_run_time.length > 0) {
+      const first = data.episode_run_time.find((v) => Number.isFinite(v) && v > 0);
+      if (first) runtimeMinutes = first;
+    }
+
     const result = {
       tmdbId: data.id,
       title: data.title || data.name,
       originalTitle: data.original_title || data.original_name,
       originalLanguage: data.original_language,
       releaseYear: (data.release_date || data.first_air_date || '').substring(0, 4),
+      runtimeMinutes,
       alternativeTitles: [],
       translations: [],
     };
@@ -502,6 +514,7 @@ async function getMetadataAndTitles({ imdbId, tmdbId, type }) {
   let originalTitle = null;
   let originalLanguage = null;
   let releaseYear = null;
+  let runtimeMinutes = null;
 
   if (usingImdb && !resolvedTmdbId) {
     // Step 1: Find TMDb ID from IMDb ID
@@ -528,7 +541,25 @@ async function getMetadataAndTitles({ imdbId, tmdbId, type }) {
     originalTitle = details.originalTitle || details.title;
     originalLanguage = details.originalLanguage || 'en';
     releaseYear = details.releaseYear || null;
+    runtimeMinutes = details.runtimeMinutes ?? null;
     console.log(`[TMDB] Using TMDb ID ${resolvedTmdbId} (${mediaType}), original: "${originalTitle}" [${originalLanguage}], year: ${releaseYear}`);
+  }
+
+  // Ensure runtime is fetched even on the IMDb-resolution path. findByExternalId
+  // doesn't return runtime; a single getDetails(en-US) backfills it. The else
+  // branch above already called getDetails so this is a cache hit there.
+  if (runtimeMinutes === null) {
+    try {
+      const details = await getDetails(resolvedTmdbId, mediaType, 'en-US');
+      if (details && Number.isFinite(details.runtimeMinutes)) {
+        runtimeMinutes = details.runtimeMinutes;
+      }
+    } catch (error) {
+      console.warn(`[TMDB] Runtime backfill failed for ${resolvedTmdbId}:`, error.message);
+    }
+  }
+  if (runtimeMinutes) {
+    console.log(`[TMDB] Runtime for ${resolvedTmdbId}: ${runtimeMinutes} min`);
   }
 
   const titles = [];
@@ -627,6 +658,7 @@ async function getMetadataAndTitles({ imdbId, tmdbId, type }) {
     originalTitle,
     originalLanguage,
     year: releaseYear,
+    runtimeMinutes,
     titles,
   };
 }

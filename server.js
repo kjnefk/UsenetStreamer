@@ -51,7 +51,22 @@ const { maskSensitiveValues, unsentinelValues, CREDENTIAL_MASK_SENTINEL, SENSITI
 const { buildTriageNntpConfig, buildNntpServersArray } = require('./src/services/triage/nntpConfig');
 const { sanitizeStrictSearchPhrase, matchesStrictSearch, normaliseTitle, levenshteinRatio, titleSimilarityCheck, TITLE_SIMILARITY_THRESHOLD } = require('./src/utils/stringUtils');
 const { formatResolutionBadge, extractQualityFeatureBadges, summarizeNewznabPlan } = require('./src/utils/formatters');
-const { normalizeUsenetGroup, extractUsenetGroup, extractFileCount, parseAllowedResolutionList, parseResolutionLimitValue, isResultFromPaidIndexer, dedupeResultsByTitle } = require('./src/utils/resultUtils');
+const { normalizeUsenetGroup, extractUsenetGroup, extractFileCount, parseAllowedResolutionList, parseResolutionLimitValue, isResultFromPaidIndexer, dedupeResultsByTitle, DEDUPE_MODES } = require('./src/utils/resultUtils');
+
+// Resolve the configured dedupe mode. Priority:
+//   1. NZB_DEDUP_MODE explicitly set ('off' | 'standard' | 'strict')
+//   2. Legacy NZB_DEDUP_ENABLED=false → 'off'
+//   3. Default / legacy NZB_DEDUP_ENABLED=true → 'standard'
+// Existing users who had dedupe enabled (or unset) get 'standard' — the exact
+// behavior they had before this knob was introduced.
+function resolveDedupeMode(env) {
+  const raw = (env.NZB_DEDUP_MODE || '').toString().trim().toLowerCase();
+  if (raw === 'off' || DEDUPE_MODES.has(raw)) return raw;
+  // No explicit mode — fall back to the legacy boolean.
+  const legacy = (env.NZB_DEDUP_ENABLED ?? 'true').toString().trim().toLowerCase();
+  if (['false', '0', 'off', 'no'].includes(legacy)) return 'off';
+  return 'standard';
+}
 const { getStreamParamsKey, encodeStreamParams, decodeStreamParams } = require('./src/utils/streamParams');
 const { isNewznabDebugEnabled, isNewznabEndpointLoggingEnabled, logNewznabDebug } = require('./src/services/newznabDebug');
 const { getPaidDirectIndexerTokens, buildPaidIndexerLimitMap } = require('./src/services/newznabIndexerLimits');
@@ -357,6 +372,21 @@ adminApiRouter.post('/config', async (req, res) => {
   }
 });
 
+// Preview a sort-config import — returns the parsed slice without
+// persisting anything. The frontend uses this to show the user what will be
+// applied before they save.
+adminApiRouter.post('/sort-import/preview', (req, res) => {
+  try {
+    const { importAioConfig } = require('./src/services/sort/aioImporter');
+    const payload = req.body || {};
+    const rawConfig = payload.config !== undefined ? payload.config : payload;
+    const result = importAioConfig(rawConfig);
+    res.json(result);
+  } catch (error) {
+    res.status(400).json({ error: error?.message || 'Failed to parse imported config' });
+  }
+});
+
 adminApiRouter.post('/test-connections', async (req, res) => {
   const payload = req.body || {};
   const { type } = payload;
@@ -554,7 +584,7 @@ let INDEXER_PREFERRED_RELEASE_GROUPS = parseCommaList(process.env.NZB_PREFERRED_
 let INDEXER_PREFERRED_VISUAL_TAGS = parseCommaList(process.env.NZB_PREFERRED_VISUAL_TAGS);
 let INDEXER_PREFERRED_AUDIO_TAGS = parseCommaList(process.env.NZB_PREFERRED_AUDIO_TAGS);
 let INDEXER_PREFERRED_KEYWORDS = parseCommaList(process.env.NZB_PREFERRED_KEYWORDS);
-let INDEXER_DEDUP_ENABLED = toBoolean(process.env.NZB_DEDUP_ENABLED, true);
+let INDEXER_DEDUP_MODE = resolveDedupeMode(process.env);
 let INDEXER_HIDE_BLOCKED_RESULTS = toBoolean(process.env.NZB_HIDE_BLOCKED_RESULTS, false);
 let INDEXER_MAX_RESULT_SIZE_BYTES = toSizeBytesFromGb(
   process.env.NZB_MAX_RESULT_SIZE_GB && process.env.NZB_MAX_RESULT_SIZE_GB !== ''
@@ -812,7 +842,7 @@ function rebuildRuntimeConfig({ log = true } = {}) {
   INDEXER_PREFERRED_VISUAL_TAGS = parseCommaList(process.env.NZB_PREFERRED_VISUAL_TAGS);
   INDEXER_PREFERRED_AUDIO_TAGS = parseCommaList(process.env.NZB_PREFERRED_AUDIO_TAGS);
   INDEXER_PREFERRED_KEYWORDS = parseCommaList(process.env.NZB_PREFERRED_KEYWORDS);
-  INDEXER_DEDUP_ENABLED = toBoolean(process.env.NZB_DEDUP_ENABLED, true);
+  INDEXER_DEDUP_MODE = resolveDedupeMode(process.env);
   INDEXER_HIDE_BLOCKED_RESULTS = toBoolean(process.env.NZB_HIDE_BLOCKED_RESULTS, false);
   INDEXER_MAX_RESULT_SIZE_BYTES = toSizeBytesFromGb(
     process.env.NZB_MAX_RESULT_SIZE_GB && process.env.NZB_MAX_RESULT_SIZE_GB !== ''
@@ -902,15 +932,20 @@ const ADMIN_CONFIG_KEYS = [
   'INDEXER_MANAGER_CACHE_MINUTES',
   'NZB_SORT_MODE',
   'NZB_SORT_ORDER',
+  'NZB_SORT_ORDER_MOVIES',
+  'NZB_SORT_ORDER_SERIES',
+  'NZB_SORT_ORDER_ANIME',
   'NZB_PREFERRED_LANGUAGE',
   'NZB_PREFERRED_QUALITIES',
   'NZB_PREFERRED_ENCODES',
   'NZB_PREFERRED_RELEASE_GROUPS',
   'NZB_PREFERRED_VISUAL_TAGS',
   'NZB_PREFERRED_AUDIO_TAGS',
+  'NZB_PREFERRED_AUDIO_CHANNELS',
   'NZB_PREFERRED_KEYWORDS',
   'NZB_MAX_RESULT_SIZE_GB',
   'NZB_DEDUP_ENABLED',
+  'NZB_DEDUP_MODE',
   'NZB_HIDE_BLOCKED_RESULTS',
   'NZB_ALLOWED_RESOLUTIONS',
   'NZB_RESOLUTION_LIMIT_PER_QUALITY',
@@ -968,6 +1003,29 @@ const ADMIN_CONFIG_KEYS = [
 ];
 
 ADMIN_CONFIG_KEYS.push('NEWZNAB_ENABLED', 'NEWZNAB_FILTER_NZB_ONLY', ...NEWZNAB_NUMBERED_KEYS);
+
+// Filter-side env vars (excluded/required/regex). These were referenced by
+// admin/index.html and the server's filter pipeline, but were missing from
+// ADMIN_CONFIG_KEYS — meaning saving the form silently discarded them. Adding
+// them here makes the form actually persist user edits.
+ADMIN_CONFIG_KEYS.push(
+  'NZB_EXCLUDED_QUALITIES',
+  'NZB_EXCLUDED_ENCODES',
+  'NZB_EXCLUDED_VISUAL_TAGS',
+  'NZB_EXCLUDED_AUDIO_TAGS',
+  'NZB_EXCLUDED_AUDIO_CHANNELS',
+  'NZB_EXCLUDED_LANGUAGES',
+  'NZB_EXCLUDED_RELEASE_GROUPS',
+  'NZB_EXCLUDED_REGEX_PATTERNS',
+  'NZB_REQUIRED_REGEX_PATTERNS',
+  'NZB_MIN_RESULT_SIZE_GB',
+  'NZB_MAX_BITRATE_MBPS',
+  // Imported sort-config textarea — read at request time, but wasn't persisted
+  // across form saves until added here. Without this, the textarea reverts to
+  // empty after every save and per-type sort criteria from the import are lost.
+  // (Env var name retained for backward compatibility with existing installs.)
+  'NZB_AIO_SORT_CONFIG',
+);
 
 function executeManagerPlanWithBackoff(plan) {
   if (INDEXER_MANAGER === 'none') {
@@ -1461,17 +1519,26 @@ async function streamHandler(req, res) {
       || (cachedSearchMeta
         ? restoreTriageDecisions(cachedSearchMeta.triageDecisionsSnapshot)
         : new Map());
+    // Resolve the dedupe mode up front. Priority:
+    //   1. ?dedupeEnabled=false query override (force 'off' for power users)
+    //   2. INDEXER_DEDUP_MODE (configured value)
+    // The cached-restore block below must honor it; previously dedupe ran
+    // unconditionally on cached results, which silently dropped streams on
+    // subsequent opens when the user had dedupe disabled and a per-quality cap on.
+    const triageOverrides = extractTriageOverrides(req.query || {});
+    const dedupeBooleanOverride = typeof triageOverrides.dedupeEnabled === 'boolean' ? triageOverrides.dedupeEnabled : null;
+    const dedupeMode = dedupeBooleanOverride === false ? 'off' : INDEXER_DEDUP_MODE;
+    const dedupeEnabled = dedupeMode !== 'off';
     if (cachedSearchMeta) {
       const restored = restoreFinalNzbResults(cachedSearchMeta.finalNzbResults);
       rawSearchResults = restored.slice();
-      dedupedSearchResults = dedupeResultsByTitle(restored, PAID_INDEXER_TOKENS);
+      dedupedSearchResults = dedupeEnabled
+        ? dedupeResultsByTitle(restored, PAID_INDEXER_TOKENS, dedupeMode)
+        : restored.slice();
       finalNzbResults = dedupedSearchResults.slice();
       usingCachedSearchResults = true;
     }
     let triageTitleMap = buildTriageTitleMap(triageDecisions);
-    const triageOverrides = extractTriageOverrides(req.query || {});
-    const dedupeOverride = typeof triageOverrides.dedupeEnabled === 'boolean' ? triageOverrides.dedupeEnabled : null;
-    const dedupeEnabled = dedupeOverride !== null ? dedupeOverride : INDEXER_DEDUP_ENABLED;
 
     const pickFirstDefined = (...values) => values.find((value) => value !== undefined && value !== null && String(value).trim() !== '') || null;
     const meta = req.query || {};
@@ -2558,7 +2625,8 @@ async function streamHandler(req, res) {
         usingStrictIdMatching
           ? aggregatedResults.map((entry) => entry.result)
           : Array.from(resultsByKey.values()).map((entry) => entry.result),
-        PAID_INDEXER_TOKENS
+        PAID_INDEXER_TOKENS,
+        dedupeMode
       );
       const rawNzbResults = rawAggregatedResults.map((entry) => entry.result);
 
@@ -2633,27 +2701,141 @@ async function streamHandler(req, res) {
     const resolvedSortOrder = INDEXER_SORT_ORDER;
     const effectiveSortMode = resolvedSortOrder.length > 0 ? 'custom_priority' : activeSortMode;
 
-    finalNzbResults = finalNzbResults.map((result, index) => annotateNzbResult(result, index));
-    finalNzbResults = prepareSortedResults(finalNzbResults, {
-      sortMode: effectiveSortMode,
-      sortOrder: resolvedSortOrder,
-      preferredLanguages: resolvedPreferredLanguages,
-      preferredQualities: INDEXER_PREFERRED_QUALITIES,
-      preferredEncodes: INDEXER_PREFERRED_ENCODES,
-      preferredReleaseGroups: INDEXER_PREFERRED_RELEASE_GROUPS,
-      preferredVisualTags: INDEXER_PREFERRED_VISUAL_TAGS,
-      preferredAudioTags: INDEXER_PREFERRED_AUDIO_TAGS,
-      preferredKeywords: INDEXER_PREFERRED_KEYWORDS,
-      maxSizeBytes: effectiveMaxSizeBytes,
-      releaseExclusions: RELEASE_EXCLUSIONS,
-      allowedResolutions: ALLOWED_RESOLUTIONS,
-      resolutionLimitPerQuality: RESOLUTION_LIMIT_PER_QUALITY,
-    });
+    // Pass the title's original-production language so annotation can tag
+    // releases as "Original" when their audio matches (e.g. Korean audio on
+    // a Korean film). Also pass TMDb runtime so bitrate can be derived from
+    // file_size * 8 / runtime — the only way Max-Bitrate filter and Bitrate
+    // sort key produce useful results (release names rarely carry explicit
+    // bitrate tokens).
+    const annotateContext = {
+      originalLanguage: tmdbMetadata?.originalLanguage || null,
+      runtimeMinutes: tmdbMetadata?.runtimeMinutes || null,
+    };
+    finalNzbResults = finalNzbResults.map((result, index) => annotateNzbResult(result, index, annotateContext));
+
+    // Sort pipeline.
+    // - If NZB_AIO_SORT_CONFIG is set (imported config), use it verbatim.
+    // - Otherwise, build an equivalent config from the legacy NZB_SORT_ORDER +
+    //   NZB_PREFERRED_* env vars so existing users see unchanged sort output.
+    try {
+      const { importAioConfig } = require('./src/services/sort/aioImporter');
+      const { buildConfigFromLegacy } = require('./src/services/sort/legacyMigration');
+      const { sortStreams } = require('./src/services/sort/sortEngine');
+      const { filterStreams } = require('./src/services/sort/filter');
+      const { precomputeMatches } = require('./src/services/sort/precompute');
+
+      let unified;
+      const rawConfig = (process.env.NZB_AIO_SORT_CONFIG || '').trim();
+      if (rawConfig) {
+        const imported = importAioConfig(rawConfig);
+        unified = {
+          sortCriteria: imported.sortCriteria,
+          preferred: imported.preferred,
+          filters: imported.filters,
+          expressions: imported.expressions,
+          source: 'imported',
+        };
+      } else {
+        const legacy = buildConfigFromLegacy(process.env);
+        // Layer legacy-era filter env vars into the unified filter shape.
+        const splitCsvEnv = (val) => (val || '')
+          .toString().split(',').map((s) => s.trim()).filter(Boolean);
+        const minSizeGb = Number.parseFloat(process.env.NZB_MIN_RESULT_SIZE_GB);
+        const minSizeBytes = Number.isFinite(minSizeGb) && minSizeGb > 0
+          ? minSizeGb * 1024 * 1024 * 1024
+          : null;
+        const maxBitrateMbps = Number.parseFloat(process.env.NZB_MAX_BITRATE_MBPS);
+        const maxBitrateBps = Number.isFinite(maxBitrateMbps) && maxBitrateMbps > 0
+          ? maxBitrateMbps * 1_000_000
+          : null;
+        const sizeRange = {};
+        if (minSizeBytes) sizeRange.min = minSizeBytes;
+        if (Number.isFinite(effectiveMaxSizeBytes) && effectiveMaxSizeBytes > 0) {
+          sizeRange.max = effectiveMaxSizeBytes;
+        }
+        const bitrateRange = {};
+        if (maxBitrateBps) bitrateRange.max = maxBitrateBps;
+
+        const linesFromEnv = (val) => (val || '')
+          .toString().split('\n').map((s) => s.trim()).filter(Boolean);
+        const filters = {
+          excluded: {
+            qualities: splitCsvEnv(process.env.NZB_EXCLUDED_QUALITIES),
+            encodes: splitCsvEnv(process.env.NZB_EXCLUDED_ENCODES),
+            visualTags: splitCsvEnv(process.env.NZB_EXCLUDED_VISUAL_TAGS),
+            audioTags: splitCsvEnv(process.env.NZB_EXCLUDED_AUDIO_TAGS),
+            audioChannels: splitCsvEnv(process.env.NZB_EXCLUDED_AUDIO_CHANNELS),
+            languages: splitCsvEnv(process.env.NZB_EXCLUDED_LANGUAGES),
+            releaseGroups: splitCsvEnv(process.env.NZB_EXCLUDED_RELEASE_GROUPS),
+            // No excluded.resolutions: resolution restriction is handled by the
+            // Allowed-Resolutions grid (included.resolutions). A separate
+            // excluded-resolutions field had no UI and was removed.
+          },
+          included: { resolutions: ALLOWED_RESOLUTIONS || [] },
+          ranges: {
+            size: Object.keys(sizeRange).length ? sizeRange : undefined,
+            bitrate: Object.keys(bitrateRange).length ? bitrateRange : undefined,
+          },
+          excludedRegex: [
+            ...(Array.isArray(RELEASE_EXCLUSIONS) ? RELEASE_EXCLUSIONS : []),
+            ...linesFromEnv(process.env.NZB_EXCLUDED_REGEX_PATTERNS),
+          ],
+          requiredRegex: linesFromEnv(process.env.NZB_REQUIRED_REGEX_PATTERNS),
+        };
+        unified = {
+          sortCriteria: legacy.sortCriteria,
+          preferred: legacy.preferred,
+          filters,
+          expressions: {
+            keywords: INDEXER_PREFERRED_KEYWORDS || [],
+          },
+          source: 'legacy-migrated',
+        };
+      }
+
+      // Note: we deliberately do NOT auto-activate `keyword`. Legacy users may
+      // have NZB_PREFERRED_KEYWORDS set without `keyword` in their sort order;
+      // the old engine treated those as a no-op. Preserving that behavior.
+
+      finalNzbResults = filterStreams(finalNzbResults, unified.filters);
+      precomputeMatches(finalNzbResults, {
+        preferredKeywordsPatterns: unified.expressions?.keywords || [],
+      });
+      // Detect anime via Kitsu/MAL ID prefix — Stremio still sends type='series' for anime.
+      const isAnimeContent = typeof id === 'string' && animeDatabase.isAnimeId(id);
+      const sortType = isAnimeContent ? 'anime' : (type === 'series' ? 'series' : 'movie');
+      finalNzbResults = sortStreams(finalNzbResults, {
+        sortCriteria: unified.sortCriteria,
+        preferred: unified.preferred,
+      }, { type: sortType });
+      console.log(`[SORT] source=${unified.source} sorted=${finalNzbResults.length}`);
+    } catch (error) {
+      console.error('[SORT] Sort engine failed, falling back to legacy:', error?.message || error);
+      finalNzbResults = prepareSortedResults(finalNzbResults, {
+        sortMode: effectiveSortMode,
+        sortOrder: resolvedSortOrder,
+        preferredLanguages: resolvedPreferredLanguages,
+        preferredQualities: INDEXER_PREFERRED_QUALITIES,
+        preferredEncodes: INDEXER_PREFERRED_ENCODES,
+        preferredReleaseGroups: INDEXER_PREFERRED_RELEASE_GROUPS,
+        preferredVisualTags: INDEXER_PREFERRED_VISUAL_TAGS,
+        preferredAudioTags: INDEXER_PREFERRED_AUDIO_TAGS,
+        preferredKeywords: INDEXER_PREFERRED_KEYWORDS,
+        maxSizeBytes: effectiveMaxSizeBytes,
+        releaseExclusions: RELEASE_EXCLUSIONS,
+        allowedResolutions: ALLOWED_RESOLUTIONS,
+        resolutionLimitPerQuality: RESOLUTION_LIMIT_PER_QUALITY,
+      });
+    }
     if (Number.isFinite(INDEXER_MIN_RESULT_SIZE_BYTES) && INDEXER_MIN_RESULT_SIZE_BYTES > 0) {
       finalNzbResults = finalNzbResults.filter(r => !Number.isFinite(r.size) || r.size >= INDEXER_MIN_RESULT_SIZE_BYTES);
     }
-    if (dedupeEnabled) {
-      finalNzbResults = dedupeResultsByTitle(finalNzbResults, PAID_INDEXER_TOKENS);
+    // Per-quality result cap (NZB_RESOLUTION_LIMIT_PER_QUALITY) — the old
+    // engine ran this inside prepareSortedResults; the new sort pipeline
+    // doesn't, so we apply it here so existing users get the same cap.
+    if (Number.isFinite(RESOLUTION_LIMIT_PER_QUALITY) && RESOLUTION_LIMIT_PER_QUALITY > 0) {
+      const { applyResolutionLimits } = require('./src/utils/helpers');
+      finalNzbResults = applyResolutionLimits(finalNzbResults, RESOLUTION_LIMIT_PER_QUALITY);
     }
 
     if (triagePrewarmPromise) {
@@ -3263,8 +3445,8 @@ async function streamHandler(req, res) {
         audio: (result.audioList || releaseInfo.audioList || []).join(' '),
       };
 
-      // Add nested context for AIOStreams template compatibility
-      // We map our flat properties to the expected 'stream' object
+      // Add a nested `stream` context so naming templates that expect the
+      // canonical template schema work without modification.
       namingContext.stream = {
         proxied: true, // We proxy everything via NZBDav/Stremio
         private: false, // Public Usenet
@@ -3289,7 +3471,7 @@ async function streamHandler(req, res) {
         filename: namingContext.filename,
         message: namingContext.health, // Map health status to message
         health: namingContext.health, // Alias for clear naming
-        releaseGroup: namingContext.group, // AIOStreams uses releaseGroup
+        releaseGroup: namingContext.group, // alias for templates that expect releaseGroup
         // Additional mappings
         shortName: namingContext.indexer,
         cached: isInstant || Boolean(triageTag && triageTag.includes('✅')),
@@ -3402,7 +3584,7 @@ async function streamHandler(req, res) {
         return parts.join(' ');
       };
 
-      // Default AIOStreams template
+      // Default stream description template
       const defaultDescriptionPattern = '{stream.title::exists["🎬 {stream.title}\n"||""]}{stream.source::exists["🎥 {stream.source} "||""]}{stream.encode::exists["🎞️ {stream.encode}\n"||"\n"]}{stream.visualTags::join(\' | \')::exists["📺 {stream.visualTags::join(\' | \')}\n"||""]}{stream.audioTags::join(\' \')::exists["🎧 {stream.audioTags::join(\' \')}\n"||""]}{stream.releaseGroup::exists["👥 {stream.releaseGroup}\n"||""]}{stream.size::>0["📦 {stream.size::bytes}\n"||""]}{stream.languages::join(\' \')::exists["🌎 {stream.languages::join(\' \')}\n"||""]}{stream.indexer::exists["🔎 {stream.indexer}"||""]}';
       const effectiveDefaultDescriptionPattern = `{stream.title::exists["🎬 {stream.title}\n"||""]}{stream.streamQuality::exists["✨ {stream.streamQuality}\n"||""]}{stream.source::exists["🎥 {stream.source}\n"||""]}{stream.encode::exists["🎞️ {stream.encode}\n"||""]}{stream.visualTags::join(" | ")::exists["📺 {stream.visualTags::join(\" | \")}\n"||""]}{stream.audioTags::join(" ")::exists["🎧 {stream.audioTags::join(\" \")}\n"||""]}{stream.releaseGroup::exists["👥 {stream.releaseGroup}\n"||""]}{stream.size::>0["📦 {stream.size::bytes}\n"||""]}{stream.languages::join(" ")::exists["🌎 {stream.languages::join(\" \")}\n"||""]}{stream.indexer::exists["🔎 {stream.indexer}\n"||""]}{stream.health::exists["🧪 {stream.health}"||""]}`;
       const effectiveDescriptionPattern = buildPatternFromTokenList(NZB_NAMING_PATTERN, 'long', effectiveDefaultDescriptionPattern);

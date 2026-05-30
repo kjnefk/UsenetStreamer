@@ -7,57 +7,144 @@ const QUALITY_FEATURE_PATTERNS = [
   { label: 'HDR10', regex: /hdr10(?!\+)/i },
   { label: 'HDR', regex: /\bhdr\b/i },
   { label: 'SDR', regex: /\bsdr\b/i },
+  // AI-upscaled / AI-enhanced releases (Topaz Video AI, etc.) — common scene
+  // markers include "AI", "AI Enhanced", "AI Upscale", "Topaz".
+  { label: 'AI', regex: /\b(ai[-_. ](?:upscal|enhanc|remaster)|ai\s*enhanc|topaz(?:[-_. ]?(?:video[-_. ]?ai|vai))?)/i },
+];
+
+// Audio channel patterns — labels aligned with the import schema so imported
+// configs map cleanly. Strict boundaries (non-digit before/after, required
+// separator) prevent false positives like "2024" matching "2.0".
+const AUDIO_CHANNEL_PATTERNS = [
+  { label: '7.1', regex: /(?<!\d)7[ .\-_]1(?:ch)?(?!\d)/i },
+  { label: '6.1', regex: /(?<!\d)6[ .\-_]1(?:ch)?(?!\d)/i },
+  { label: '5.1', regex: /(?<!\d)5[ .\-_]1(?:ch)?(?!\d)/i },
+  { label: '2.0', regex: /(?<!\d)2[ .\-_]0(?:ch)?(?!\d)/i },
+  // "Stereo" tag is treated as 2.0 (same channel count). Emitting 2.0
+  // keeps the canonical form so sort/filter synonym maps work uniformly.
+  { label: '2.0', regex: /\bstereo\b/i },
+  // "Mono" → 1.0.
+  { label: '1.0', regex: /\bmono\b/i },
+  // Channel-count shorthand seen in real releases (e.g. "...x265.6ch...",
+  // "...8 ch..."): 8ch = 7.1, 6ch = 5.1. Emit the canonical X.Y label directly.
+  // A preceding DIGIT is excluded so a year fragment like "...216ch" can't
+  // match; the token itself is "6ch"/"8ch" with optional whitespace before "ch".
+  { label: '7.1', regex: /(?<!\d)8\s*ch(?!\d)/i },
+  { label: '5.1', regex: /(?<!\d)6\s*ch(?!\d)/i },
+];
+
+function detectAudioChannels(rawTitle) {
+  if (!rawTitle) return [];
+  const found = [];
+  for (const { label, regex } of AUDIO_CHANNEL_PATTERNS) {
+    if (regex.test(rawTitle) && !found.includes(label)) {
+      found.push(label);
+    }
+  }
+  return found;
+}
+
+// Meta-language values aren't actual languages — they describe a property of
+// the release (e.g. has multiple audio tracks, audio is dubbed, audio matches
+// the title's original language). Listed alongside real languages so users
+// can include/exclude/prefer them in the same UI list. Mirrors the common
+// aggregator preferred-languages vocabulary.
+const META_LANGUAGES = [
+  'Original',     // detected at request time: release audio matches title's original_language
+  'Multi',        // 3+ audio tracks
+  'Dual Audio',   // exactly 2 audio tracks
+  'Dubbed',       // parser flagged release as dubbed
+  'Unknown',      // parser produced no languages
 ];
 
 const LANGUAGE_FILTERS = [
   'English',
+  // South Asian
   'Tamil',
   'Hindi',
   'Malayalam',
   'Kannada',
   'Telugu',
-  'Chinese',
-  'Russian',
-  'Arabic',
-  'Japanese',
-  'Korean',
-  'Taiwanese',
-  'Latino',
-  'French',
-  'Spanish',
-  'Portuguese',
-  'Italian',
-  'German',
-  'Ukrainian',
-  'Polish',
-  'Czech',
-  'Thai',
-  'Indonesian',
-  'Vietnamese',
-  'Dutch',
   'Bengali',
-  'Turkish',
-  'Greek',
-  'Swedish',
-  'Romanian',
-  'Hungarian',
-  'Finnish',
-  'Norwegian',
-  'Danish',
-  'Hebrew',
-  'Lithuanian',
   'Punjabi',
   'Marathi',
   'Gujarati',
   'Bhojpuri',
   'Nepali',
   'Urdu',
+  'Sinhala',
+  // East Asian
+  'Chinese',
+  'Japanese',
+  'Korean',
+  'Taiwanese',
+  'Mongolian',
+  // Southeast Asian
+  'Thai',
+  'Indonesian',
+  'Vietnamese',
   'Tagalog',
   'Filipino',
   'Malay',
-  'Mongolian',
+  'Khmer',
+  'Lao',
+  'Burmese',
+  // Middle East / Central Asia
+  'Arabic',
+  'Hebrew',
+  'Persian',
+  'Pashto',
+  'Turkish',
+  'Azerbaijani',
+  'Kazakh',
+  'Uzbek',
   'Armenian',
-  'Georgian'
+  'Georgian',
+  // Eastern Europe / Slavic
+  'Russian',
+  'Ukrainian',
+  'Polish',
+  'Czech',
+  'Slovak',
+  'Slovenian',
+  'Croatian',
+  'Serbian',
+  'Bulgarian',
+  'Macedonian',
+  'Belarusian',
+  'Albanian',
+  // Northern Europe / Baltic
+  'Swedish',
+  'Norwegian',
+  'Danish',
+  'Finnish',
+  'Icelandic',
+  'Estonian',
+  'Latvian',
+  'Lithuanian',
+  // Central / Western Europe
+  'German',
+  'French',
+  'Dutch',
+  'Italian',
+  'Hungarian',
+  'Romanian',
+  'Greek',
+  'Welsh',
+  'Irish',
+  // Iberian + Latin America
+  'Spanish',
+  'Portuguese',
+  'Latino',
+  'Catalan',
+  'Basque',
+  'Galician',
+  // Africa
+  'Afrikaans',
+  'Swahili',
+  'Amharic',
+  'Yoruba',
+  'Zulu',
 ];
 
 const LANGUAGE_SYNONYMS = {
@@ -106,9 +193,47 @@ const LANGUAGE_SYNONYMS = {
   Tagalog: ['tagalog'],
   Filipino: ['filipino'],
   Malay: ['malay', 'bahasa melayu'],
-  Mongolian: ['mongolian'],
-  Armenian: ['armenian'],
-  Georgian: ['georgian']
+  Mongolian: ['mongolian', 'mon'],
+  Armenian: ['armenian', 'arm', 'hye'],
+  Georgian: ['georgian', 'geo', 'kat'],
+  // South Asian additions
+  Sinhala: ['sinhala', 'sinhalese', 'sin'],
+  // SE Asian additions
+  Khmer: ['khmer', 'cambodian', 'khm'],
+  Lao: ['lao', 'laotian'],
+  Burmese: ['burmese', 'myanmar', 'mya', 'bur'],
+  // Middle East / Central Asia additions
+  Persian: ['persian', 'farsi', 'fas', 'per'],
+  Pashto: ['pashto', 'pus', 'pash'],
+  Azerbaijani: ['azerbaijani', 'azeri', 'aze'],
+  Kazakh: ['kazakh', 'kaz'],
+  Uzbek: ['uzbek', 'uzb'],
+  // Slavic / Balkan additions
+  Slovak: ['slovak', 'slovenský', 'slk', 'slo'],
+  Slovenian: ['slovenian', 'slovene', 'slv'],
+  Croatian: ['croatian', 'hrvatski', 'hrv'],
+  Serbian: ['serbian', 'srpski', 'srp'],
+  Bulgarian: ['bulgarian', 'bul'],
+  Macedonian: ['macedonian', 'mkd'],
+  Belarusian: ['belarusian', 'belarussian', 'bel'],
+  Albanian: ['albanian', 'shqip', 'alb', 'sqi'],
+  // Northern Europe / Baltic additions
+  Icelandic: ['icelandic', 'islenska', 'isl', 'ice'],
+  Estonian: ['estonian', 'eesti', 'est'],
+  Latvian: ['latvian', 'latviešu', 'lav'],
+  // Western Europe additions
+  Welsh: ['welsh', 'cymraeg', 'cym', 'wel'],
+  Irish: ['irish', 'gaeilge', 'gle'],
+  // Iberian additions
+  Catalan: ['catalan', 'català', 'cat'],
+  Basque: ['basque', 'euskara', 'eus', 'baq'],
+  Galician: ['galician', 'galego', 'glg'],
+  // Africa additions
+  Afrikaans: ['afrikaans', 'afr'],
+  Swahili: ['swahili', 'kiswahili', 'swa'],
+  Amharic: ['amharic', 'amh'],
+  Yoruba: ['yoruba', 'yor'],
+  Zulu: ['zulu', 'zul']
 };
 
 const LANGUAGE_PATTERNS = Object.fromEntries(
@@ -228,12 +353,45 @@ function parseReleaseMetadata(title) {
     }
   }
 
+  // The parse-torrent-title library emits "multi audio" / "multi subs" as
+  // markers in the languages array (they mean "multiple tracks", not a real
+  // language). Strip them so they don't (a) pollute the exposed languages list
+  // or (b) inflate the meta-language count below. We track the marker
+  // separately as `hasMultiMarker`.
+  const rawLanguages = Array.isArray(parsed.languages) ? parsed.languages : [];
+  const realLanguages = rawLanguages.filter((lang) => !/\bmulti\b/i.test(String(lang)));
+  const hasMultiMarker = /\bmulti\b/i.test(rawTitle)
+    || rawLanguages.some((lang) => /\bmulti\b/i.test(String(lang)));
+
+  // Derive meta-language tokens from the parsed output. These describe the
+  // release's audio shape (not a specific language) and are exposed alongside
+  // real languages so users can include/exclude them in the same preferred
+  // list. `Original` is NOT derivable here — it depends on the title's
+  // original-production language and is added at request annotation time
+  // when TMDb context is available.
+  const inferredLanguages = [];
+  if (hasMultiMarker) {
+    // A MULTI marker means multiple audio tracks — definitively "Multi", and
+    // never "Unknown" (we know it's multi-language even if names weren't parsed).
+    inferredLanguages.push('Multi');
+  } else if (realLanguages.length === 0) {
+    inferredLanguages.push('Unknown');
+  } else if (realLanguages.length === 2) {
+    inferredLanguages.push('Dual Audio');
+  } else if (realLanguages.length >= 3) {
+    inferredLanguages.push('Multi');
+  }
+  if (parsed.dubbed) {
+    inferredLanguages.push('Dubbed');
+  }
+
   // Map library fields to internal schema
   return {
     parsedTitle, // Parsed title (stripped of metadata)
     parsedTitleDisplay,
     resolution,
-    languages: Array.isArray(parsed.languages) ? parsed.languages : [],
+    languages: realLanguages,
+    inferredLanguages,
     qualityLabel: parsed.quality || parsed.source || parsed.codec || null,
     qualityScore,
     codec: parsed.codec || null,
@@ -269,12 +427,16 @@ function parseReleaseMetadata(title) {
     visualTags: QUALITY_FEATURE_PATTERNS
       .filter(({ regex }) => regex.test(rawTitle))
       .map(({ label }) => label),
+    audioChannels: detectAudioChannels(rawTitle),
+    // Bitrate is intentionally NOT parsed from the title. It is derived later
+    // from file size + TMDb runtime in annotateNzbResult (see helpers.js).
   };
 }
 
 module.exports = {
   LANGUAGE_FILTERS,
   LANGUAGE_SYNONYMS,
+  META_LANGUAGES,
   QUALITY_FEATURE_PATTERNS,
   parseReleaseMetadata,
 };

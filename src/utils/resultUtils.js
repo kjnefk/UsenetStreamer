@@ -54,8 +54,20 @@ function isResultFromPaidIndexer(result, paidTokens) {
   return tokens.some((token) => paidTokens.has(token));
 }
 
-function dedupeResultsByTitle(results, paidTokens = new Set()) {
+// Dedupe modes:
+//   'standard' — title + usenetGroup as bucket key, 14-day publish window inside
+//                each bucket. Re-posts to different groups stay as separate
+//                streams. This is the historical behavior.
+//   'strict'   — normalized title only as bucket key, no publish window. Any
+//                same-title release collapses into one regardless of group or
+//                age. Removes more streams than standard.
+const DEDUPE_MODES = new Set(['standard', 'strict']);
+
+function dedupeResultsByTitle(results, paidTokens = new Set(), mode = 'standard') {
   if (!Array.isArray(results) || results.length === 0) return [];
+  const dedupeMode = DEDUPE_MODES.has(mode) ? mode : 'standard';
+  const useDateWindow = dedupeMode === 'standard';
+  const useGroupInKey = dedupeMode === 'standard';
   const buckets = new Map();
   const deduped = [];
   for (const result of results) {
@@ -75,7 +87,7 @@ function dedupeResultsByTitle(results, paidTokens = new Set()) {
       deduped.push(result);
       continue;
     }
-    const usenetGroup = extractUsenetGroup(result);
+    const usenetGroup = useGroupInKey ? extractUsenetGroup(result) : '';
     const bucketKey = usenetGroup ? `${normalizedTitle}|${usenetGroup}` : normalizedTitle;
     let bucket = buckets.get(bucketKey);
     if (!bucket) {
@@ -87,7 +99,9 @@ function dedupeResultsByTitle(results, paidTokens = new Set()) {
     const candidateFiles = extractFileCount(result);
     let matchedEntry = null;
     for (const entry of bucket) {
-      if (areReleasesWithinDays(entry.publishDateMs ?? null, candidatePublish ?? null, DEDUPE_MAX_PUBLISH_DIFF_DAYS)) {
+      // Standard mode requires the date window to match; strict mode collapses
+      // any same-title entry already in the bucket regardless of age.
+      if (!useDateWindow || areReleasesWithinDays(entry.publishDateMs ?? null, candidatePublish ?? null, DEDUPE_MAX_PUBLISH_DIFF_DAYS)) {
         matchedEntry = entry;
         break;
       }
@@ -129,6 +143,7 @@ function dedupeResultsByTitle(results, paidTokens = new Set()) {
 
 module.exports = {
   DEDUPE_MAX_PUBLISH_DIFF_DAYS,
+  DEDUPE_MODES,
   normalizeUsenetGroup,
   extractUsenetGroup,
   extractFileCount,

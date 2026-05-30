@@ -2,22 +2,84 @@
 const { parseReleaseMetadata } = require('../services/metadata/releaseParser');
 const { normalizeReleaseTitle } = require('./parsers');
 const { resolveLanguageLabel, toFiniteNumber, toBoolean, parseCommaList } = require('./config');
+const { LANGUAGE_SYNONYMS } = require('../services/sort/sortKeys');
 
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
-function annotateNzbResult(result, sortIndex = 0) {
+// Canonicalize a language token (ISO code, 3-letter code, or full name) to a
+// single comparable form via LANGUAGE_SYNONYMS. The release parser emits
+// 2-letter ISO codes (e.g. 'hi', 'ko', 'en'), and TMDb's originalLanguage is
+// also a 2-letter code — so 'Original' detection compares CODE↔CODE through
+// this canonicalizer (NOT code↔full-label, which never matched).
+function canonicalizeLanguage(value) {
+  const s = String(value || '').trim().toLowerCase();
+  if (!s) return '';
+  return LANGUAGE_SYNONYMS[s] || s;
+}
+
+/**
+ * @param {object} result
+ * @param {number} [sortIndex]
+ * @param {object} [context]
+ * @param {string} [context.originalLanguage] - TMDb-style 2-letter code or full label
+ *   for the title's original-production language. When provided and the
+ *   parsed release languages include it, the stream gets an `Original`
+ *   token in its inferredLanguages array so users can prefer/exclude it.
+ * @param {number} [context.runtimeMinutes] - TMDb runtime in minutes for the
+ *   requested title. When provided and the release has a file size, we derive
+ *   bitrate as `size_bytes * 8 / (runtime_minutes * 60)` bits-per-second. NZB
+ *   titles almost never carry explicit bitrate, so this calculation is the
+ *   only way the Max-Bitrate filter and Bitrate sort key produce useful
+ *   results for most streams.
+ */
+function annotateNzbResult(result, sortIndex = 0, context = {}) {
   if (!result || typeof result !== 'object') return result;
   const metadata = parseReleaseMetadata(result.title || '');
   const normalizedTitle = normalizeReleaseTitle(result.title);
   const primaryLanguage = result.language || (Array.isArray(metadata.languages) && metadata.languages.length > 0 ? metadata.languages[0] : null);
   const derivedQualityRank = Number.isFinite(metadata.qualityScore) ? metadata.qualityScore : 0;
+
+  // Derive Original tag when the release contains audio in the title's
+  // original-production language. Both the release languages (parser output)
+  // and context.originalLanguage (from TMDb) are ISO codes, so we compare them
+  // through canonicalizeLanguage (code/alias → canonical) rather than mapping
+  // to a display label.
+  const inferredLanguages = Array.isArray(metadata.inferredLanguages) ? metadata.inferredLanguages.slice() : [];
+  const originalRaw = context && context.originalLanguage;
+  if (originalRaw) {
+    const originalCanon = canonicalizeLanguage(originalRaw);
+    if (originalCanon) {
+      const releaseLangs = Array.isArray(metadata.languages) ? metadata.languages : [];
+      const hasOriginal = releaseLangs.some((lang) => canonicalizeLanguage(lang) === originalCanon);
+      if (hasOriginal && !inferredLanguages.includes('Original')) {
+        inferredLanguages.push('Original');
+      }
+    }
+  }
+
+  // Bitrate is derived solely from file size + TMDb runtime (the standard
+  // metadata-runtime approach). We do NOT parse bitrate from release
+  // titles — the rare "10Mbps" token is unreliable and inconsistent. So when
+  // TMDb runtime is unavailable, bitrate stays unknown and the Bitrate sort
+  // key / Max-Bitrate filter simply don't apply to that stream.
+  let derivedBitrate = null;
+  const runtimeMinutes = context && Number.isFinite(context.runtimeMinutes) ? context.runtimeMinutes : null;
+  const sizeBytes = Number.isFinite(result.size) ? result.size : null;
+  if (runtimeMinutes && runtimeMinutes > 0 && sizeBytes && sizeBytes > 0) {
+    derivedBitrate = Math.round((sizeBytes * 8) / (runtimeMinutes * 60));
+  }
+
   const annotated = {
     ...result,
     ...metadata,
+    inferredLanguages,
     sortIndex,
     normalizedTitle,
     qualityRank: derivedQualityRank,
   };
+  if (derivedBitrate !== null) {
+    annotated.bitrate = derivedBitrate;
+  }
   if (primaryLanguage) {
     annotated.language = primaryLanguage;
   }

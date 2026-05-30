@@ -22,9 +22,27 @@
   const tmdbLanguageHiddenInput = configForm.querySelector('[data-tmdb-language-hidden]');
   const tmdbLanguageCheckboxes = Array.from(configForm.querySelectorAll('input[data-tmdb-language-option]'));
   const tmdbLanguageSelector = configForm.querySelector('[data-tmdb-language-selector]');
-  const sortOrderHiddenInput = configForm.querySelector('[data-sort-order-hidden]');
-  const sortOrderOptions = Array.from(configForm.querySelectorAll('input[data-sort-order-option]'));
-  const sortOrderCurrentHint = configForm.querySelector('[data-sort-order-current]');
+  // Sort builder registry — one entry per scope (global, movies, series, anime).
+  // Each builder owns its hidden input, its option checkboxes, and its activeOrder
+  // state. Global is the legacy NZB_SORT_ORDER list; per-type lists fall back to
+  // global at engine time when empty.
+  const sortBuilders = {};
+  Array.from(configForm.querySelectorAll('[data-sort-order-builder]')).forEach((container) => {
+    const scope = container.dataset.sortOrderBuilder || 'global';
+    sortBuilders[scope] = {
+      scope,
+      container,
+      hiddenInput: container.querySelector('[data-sort-order-hidden]'),
+      summaryEl: container.querySelector('[data-sort-order-current]'),
+      options: Array.from(container.querySelectorAll('input[data-sort-order-option]')),
+      activeOrder: [],
+    };
+  });
+  const globalBuilder = sortBuilders.global || null;
+  // Legacy aliases referenced by other UI controls (sorting hint, import preview).
+  const sortOrderHiddenInput = globalBuilder ? globalBuilder.hiddenInput : null;
+  const sortOrderOptions = globalBuilder ? globalBuilder.options : [];
+  const sortOrderCurrentHint = globalBuilder ? globalBuilder.summaryEl : null;
   const tmdbEnabledToggle = configForm.querySelector('input[name="TMDB_ENABLED"]');
   const tmdbApiInput = configForm.querySelector('input[name="TMDB_API_KEY"]');
   const tmdbTestButton = configForm.querySelector('button[data-test="tmdb"]');
@@ -49,7 +67,35 @@
 
   const MAX_NEWZNAB_INDEXERS = 20;
   const NEWZNAB_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAID_LIMIT', 'ZYCLOPS', 'SEARCH_UA', 'DOWNLOAD_UA'];
-  const SUPPORTED_SORT_KEYS = ['language', 'release_group', 'size', 'resolution', 'quality', 'encode', 'visual_tag', 'audio_tag', 'keyword', 'date', 'files'];
+
+  // Canonical option vocabularies for preferred/excluded chip helpers.
+  // Aligned with the import schema so imported configs map 1:1. Release groups
+  // and keywords are inherently open-ended; the chips are common-examples
+  // helpers, not an exhaustive list.
+  const OPTION_VOCAB = {
+    qualities: ['BluRay REMUX', 'BluRay', 'WEB-DL', 'WEBRip', 'HDRip', 'HC HD-Rip', 'DVDRip', 'HDTV', 'SCR', 'TC', 'TS', 'CAM', 'Unknown'],
+    encodes: ['AV1', 'HEVC', 'AVC', 'XviD', 'DivX', 'Unknown'],
+    visualTags: ['HDR+DV', 'DV', 'HDR10+', 'HDR10', 'HDR', 'HLG', '10bit', 'SDR', 'IMAX', 'AI', '3D'],
+    audioTags: ['Atmos', 'DTS:X', 'TrueHD', 'DTS-HD MA', 'FLAC', 'DTS-HD', 'DTS-ES', 'DTS', 'DD+', 'DD', 'OPUS', 'AAC'],
+    audioChannels: ['7.1', '6.1', '5.1', '2.1', '2.0', 'Stereo', '1.0', 'Mono'],
+    // Meta-language tokens (Original / Multi / Dual Audio / Dubbed / Unknown)
+    // first so power users see them at the top of the chip grid. Real
+    // languages follow in rough usage-frequency order.
+    languages: [
+      'Original', 'Multi', 'Dual Audio', 'Dubbed', 'Unknown',
+      'English', 'Spanish', 'French', 'German', 'Italian', 'Portuguese',
+      'Hindi', 'Tamil', 'Telugu', 'Malayalam', 'Kannada', 'Bengali', 'Punjabi', 'Marathi', 'Gujarati', 'Urdu',
+      'Chinese', 'Japanese', 'Korean',
+      'Russian', 'Ukrainian', 'Polish', 'Czech', 'Slovak',
+      'Arabic', 'Persian', 'Turkish', 'Hebrew',
+      'Dutch', 'Swedish', 'Norwegian', 'Danish', 'Finnish',
+      'Indonesian', 'Vietnamese', 'Thai', 'Tagalog', 'Malay',
+      'Greek', 'Romanian', 'Hungarian',
+    ],
+    releaseGroups: ['FraMeSToR', 'FLUX', 'NTb', 'CtrlHD', 'EVO', 'RARBG', 'YIFY', 'NTG', 'Tigole', 'ETHEL', 'GalaxyRG', 'MeGusta', 'TBM', 'PSA', 'QxR'],
+    keywords: ['criterion', 'extended', 'proper', 'repack', 'remastered', 'directors-cut', 'unrated', 'theatrical', 'imax', 'open-matte'],
+  };
+  const SUPPORTED_SORT_KEYS = ['language', 'release_group', 'size', 'resolution', 'quality', 'encode', 'visual_tag', 'audio_tag', 'audio_channel', 'keyword', 'date', 'files'];
   const SORT_LABELS = {
     language: 'Language',
     release_group: 'Release Group',
@@ -59,10 +105,17 @@
     encode: 'Encode',
     visual_tag: 'Visual Tag',
     audio_tag: 'Audio Tag',
+    audio_channel: 'Audio Channel',
     keyword: 'Keyword',
     date: 'Date',
     files: 'File Count',
   };
+  // Per-key default direction. Users can override via the toggle button.
+  const SORT_DEFAULT_DIRECTIONS = {
+    files: 'asc',  // legacy: fewer first
+    // everything else defaults to 'desc'
+  };
+  const getDefaultDirection = (key) => SORT_DEFAULT_DIRECTIONS[key] || 'desc';
 
   const managerSelect = configForm.querySelector('select[name="INDEXER_MANAGER"]');
   const newznabList = document.getElementById('newznab-indexers-list');
@@ -281,16 +334,41 @@
     syncQualityHiddenInput();
   }
 
+  // Preferred languages are an ORDERED list — the engine ranks streams by
+  // first-match index. Checkbox grids serialize in DOM order, which loses
+  // the user's intended priority. So we track the click order ourselves:
+  // first tick → priority 1, second tick → priority 2, etc.
+  // A numbered badge on each ticked label makes the order visible.
+  let languagePriorityOrder = [];
+
+  function refreshLanguagePriorityBadges() {
+    languageCheckboxes.forEach((checkbox) => {
+      const label = checkbox.closest('label');
+      if (!label) return;
+      let badge = label.querySelector('[data-language-priority-badge]');
+      const index = languagePriorityOrder.indexOf(checkbox.value);
+      if (index === -1) {
+        if (badge) badge.textContent = '';
+        return;
+      }
+      if (!badge) {
+        badge = document.createElement('span');
+        badge.className = 'sort-order-index';
+        badge.setAttribute('data-language-priority-badge', '');
+        label.appendChild(badge);
+      }
+      badge.textContent = String(index + 1);
+    });
+  }
+
   function getSelectedLanguages() {
-    return languageCheckboxes
-      .filter((checkbox) => checkbox.checked)
-      .map((checkbox) => checkbox.value)
-      .filter((value) => value && value.trim().length > 0);
+    return languagePriorityOrder.slice();
   }
 
   function syncLanguageHiddenInput() {
     if (!languageHiddenInput) return;
-    languageHiddenInput.value = getSelectedLanguages().join(',');
+    languageHiddenInput.value = languagePriorityOrder.join(',');
+    refreshLanguagePriorityBadges();
     syncConfigWarnings();
   }
 
@@ -300,56 +378,253 @@
     const tokens = stored
       ? stored.split(',').map((value) => value.trim()).filter((value) => value.length > 0)
       : [];
-    const selectedSet = new Set(tokens);
+    // Validate against actual checkbox values so legacy/imported lists with
+    // unknown tokens don't break the picker.
+    const knownValues = new Set(languageCheckboxes.map((cb) => cb.value));
+    languagePriorityOrder = tokens.filter((token) => knownValues.has(token));
+    const selectedSet = new Set(languagePriorityOrder);
     languageCheckboxes.forEach((checkbox) => {
       checkbox.checked = selectedSet.has(checkbox.value);
     });
     syncLanguageHiddenInput();
   }
 
+  // Sort order is now an ordered array of { key, direction } pairs.
+  // Wire format: "key:direction,key:direction,..." with bare key falling back
+  // to the per-key default direction (backward-compat with old NZB_SORT_ORDER).
   function parseSortOrder(raw) {
     const seen = new Set();
-    return (raw || '')
-      .split(',')
-      .map((value) => value.trim().toLowerCase())
-      .filter((value) => {
-        if (!value || !SUPPORTED_SORT_KEYS.includes(value) || seen.has(value)) return false;
-        seen.add(value);
-        return true;
-      });
+    const out = [];
+    (raw || '').split(',').forEach((token) => {
+      const trimmed = token.trim().toLowerCase();
+      if (!trimmed) return;
+      const [keyRaw, dirRaw] = trimmed.split(':');
+      const key = (keyRaw || '').trim();
+      if (!SUPPORTED_SORT_KEYS.includes(key) || seen.has(key)) return;
+      seen.add(key);
+      const direction = dirRaw === 'asc' || dirRaw === 'desc' ? dirRaw : getDefaultDirection(key);
+      out.push({ key, direction });
+    });
+    return out;
   }
 
   function getDefaultSortOrder() {
-    if (loadedSortMode === 'language_quality_size') return ['language', 'resolution', 'size'];
-    return ['resolution', 'size', 'files'];
+    if (loadedSortMode === 'language_quality_size') {
+      return [
+        { key: 'language', direction: 'desc' },
+        { key: 'resolution', direction: 'desc' },
+        { key: 'size', direction: 'desc' },
+      ];
+    }
+    return [
+      { key: 'resolution', direction: 'desc' },
+      { key: 'size', direction: 'desc' },
+      { key: 'files', direction: 'asc' },
+    ];
   }
 
-  function syncSortOrderUI() {
-    if (sortOrderHiddenInput) {
-      sortOrderHiddenInput.value = activeSortOrder.join(',');
+  function serializeSortOrder(order) {
+    return order.map((entry) => {
+      const dir = entry.direction || getDefaultDirection(entry.key);
+      return dir === getDefaultDirection(entry.key) ? entry.key : `${entry.key}:${dir}`;
+    }).join(',');
+  }
+
+  function findOrderIndex(order, key) {
+    for (let i = 0; i < order.length; i += 1) {
+      if (order[i].key === key) return i;
     }
-    const displayOrder = activeSortOrder.length > 0 ? activeSortOrder : getDefaultSortOrder();
-    sortOrderOptions.forEach((option) => {
+    return -1;
+  }
+
+  function syncBuilderUI(builder) {
+    if (!builder) return;
+    if (builder.hiddenInput) {
+      builder.hiddenInput.value = serializeSortOrder(builder.activeOrder);
+    }
+    // Only the global builder shows the legacy default order when empty —
+    // per-type lists render empty (the engine falls back to global at runtime).
+    const fallbackOrder = builder.scope === 'global' ? getDefaultSortOrder() : [];
+    const displayOrder = builder.activeOrder.length > 0 ? builder.activeOrder : fallbackOrder;
+    builder.options.forEach((option) => {
       const key = (option.value || '').trim().toLowerCase();
-      const index = displayOrder.indexOf(key);
-      option.checked = index !== -1;
+      const index = findOrderIndex(displayOrder, key);
+      option.checked = index !== -1 && builder.activeOrder.length > 0;
       const label = option.closest('label');
-      const badge = label ? label.querySelector('[data-sort-order-index]') : null;
+      if (!label) return;
+      const badge = label.querySelector('[data-sort-order-index]');
       if (badge) {
-        badge.textContent = index === -1 ? '' : String(index + 1);
+        badge.textContent = index === -1 || builder.activeOrder.length === 0 ? '' : String(index + 1);
+      }
+      // Render the direction toggle inline; create if missing.
+      let dirBtn = label.querySelector('[data-sort-direction-toggle]');
+      if (!dirBtn) {
+        dirBtn = document.createElement('button');
+        dirBtn.type = 'button';
+        dirBtn.className = 'sort-direction-toggle';
+        dirBtn.setAttribute('data-sort-direction-toggle', '');
+        dirBtn.title = 'Toggle sort direction';
+        label.appendChild(dirBtn);
+        dirBtn.addEventListener('click', (event) => {
+          event.preventDefault();
+          event.stopPropagation();
+          const idx = findOrderIndex(builder.activeOrder, key);
+          if (idx === -1) return; // only meaningful when active
+          const current = builder.activeOrder[idx].direction;
+          builder.activeOrder[idx].direction = current === 'asc' ? 'desc' : 'asc';
+          syncBuilderUI(builder);
+          syncSaveGuard();
+        });
+      }
+      const isActive = builder.activeOrder.length > 0 && index !== -1;
+      if (!isActive) {
+        dirBtn.classList.add('hidden');
+      } else {
+        dirBtn.classList.remove('hidden');
+        const dir = displayOrder[index].direction || getDefaultDirection(key);
+        dirBtn.textContent = dir === 'asc' ? '↑' : '↓';
+        dirBtn.dataset.direction = dir;
       }
     });
   }
 
+  // Backward-compat wrapper used by other code that operates on the "main" sort.
+  function syncSortOrderUI() {
+    syncBuilderUI(globalBuilder);
+  }
+
+  function setBuilderOrder(builder, order) {
+    if (!builder) return;
+    const asString = Array.isArray(order)
+      ? order.map((entry) => typeof entry === 'string' ? entry : `${entry.key}:${entry.direction || ''}`).join(',')
+      : String(order || '');
+    builder.activeOrder = parseSortOrder(asString);
+    if (builder.scope === 'global') {
+      activeSortOrder = builder.activeOrder;
+    }
+    syncBuilderUI(builder);
+    if (builder.scope === 'global') {
+      // Global change re-runs the full sorting controls sync (also re-paints
+      // per-type summaries via syncSortingControls' loop + the language warning).
+      syncSortingControls();
+    } else {
+      // Per-type change only needs to refresh its own summary.
+      updateBuilderSummary(builder);
+    }
+  }
+
   function setSortOrder(order) {
-    activeSortOrder = parseSortOrder(Array.isArray(order) ? order.join(',') : String(order || ''));
-    syncSortOrderUI();
-    syncSortingControls();
+    setBuilderOrder(globalBuilder, order);
   }
 
   function applySortOrderFromHidden() {
-    if (!sortOrderHiddenInput) return;
-    setSortOrder(sortOrderHiddenInput.value || '');
+    Object.values(sortBuilders).forEach((builder) => {
+      if (!builder.hiddenInput) return;
+      setBuilderOrder(builder, builder.hiddenInput.value || '');
+    });
+  }
+
+  // === Suggestion panel helpers ===================================
+  // Each <div data-suggestions data-suggestions-categories="[{...}]"> becomes
+  // a grouped chip picker. The JSON config lists categories: each has a
+  // {vocab, heading, input} triple — vocab picks the list from OPTION_VOCAB,
+  // input names the form input the chips drive. Clicking a chip toggles the
+  // value in that input's comma-separated list. Highlights mirror current
+  // input state, case-insensitive.
+  function parseCommaInput(value) {
+    return (value || '').split(',').map((token) => token.trim()).filter(Boolean);
+  }
+
+  function toggleValueInCommaInput(input, value) {
+    const tokens = parseCommaInput(input.value);
+    const lowerValue = value.toLowerCase();
+    const existingIndex = tokens.findIndex((token) => token.toLowerCase() === lowerValue);
+    if (existingIndex !== -1) {
+      tokens.splice(existingIndex, 1);
+    } else {
+      tokens.push(value);
+    }
+    input.value = tokens.join(',');
+    // Dispatch input + change so any field watchers (save-guard, warnings) re-run.
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+    input.dispatchEvent(new Event('change', { bubbles: true }));
+  }
+
+  function refreshCategoryChipStates(input, categoryEl) {
+    const tokensLower = parseCommaInput(input.value).map((token) => token.toLowerCase());
+    categoryEl.querySelectorAll('.option-chip').forEach((chip) => {
+      const value = (chip.dataset.value || '').toLowerCase();
+      chip.classList.toggle('active', tokensLower.includes(value));
+    });
+  }
+
+  function setupSuggestionPanels() {
+    configForm.querySelectorAll('[data-suggestions]').forEach((panel) => {
+      // Idempotent: don't rebuild on re-runs.
+      if (panel.dataset.suggestionsBuilt === '1') return;
+      let categories;
+      try {
+        categories = JSON.parse(panel.dataset.suggestionsCategories || '[]');
+      } catch (error) {
+        console.warn('[suggestions] failed to parse categories config', error);
+        return;
+      }
+      categories.forEach((cat) => {
+        const vocab = OPTION_VOCAB[cat.vocab];
+        const input = configForm.querySelector(`input[name="${cat.input}"]`);
+        if (!Array.isArray(vocab) || vocab.length === 0 || !input) return;
+
+        const categoryEl = document.createElement('div');
+        categoryEl.className = 'option-category';
+        categoryEl.dataset.vocab = cat.vocab;
+        categoryEl.dataset.inputName = cat.input;
+        const heading = document.createElement('h4');
+        heading.textContent = cat.heading;
+        const chipRow = document.createElement('div');
+        chipRow.className = 'option-chip-row';
+        vocab.forEach((value) => {
+          const chip = document.createElement('button');
+          chip.type = 'button';
+          chip.className = 'option-chip';
+          chip.dataset.value = value;
+          chip.textContent = value;
+          chip.addEventListener('click', (event) => {
+            event.preventDefault();
+            toggleValueInCommaInput(input, value);
+            refreshCategoryChipStates(input, categoryEl);
+          });
+          chipRow.appendChild(chip);
+        });
+        categoryEl.appendChild(heading);
+        categoryEl.appendChild(chipRow);
+        panel.appendChild(categoryEl);
+
+        refreshCategoryChipStates(input, categoryEl);
+        // Re-highlight chips when the input changes (typing or import path).
+        input.addEventListener('input', () => refreshCategoryChipStates(input, categoryEl));
+      });
+      panel.dataset.suggestionsBuilt = '1';
+    });
+  }
+
+  // After populateForm() writes input.value directly (no `input` event),
+  // re-paint all chips against the freshly loaded values.
+  function refreshAllChipPickers() {
+    configForm.querySelectorAll('[data-suggestions]').forEach((panel) => {
+      panel.querySelectorAll('.option-category').forEach((categoryEl) => {
+        // Find the input this category is bound to — we stashed nothing on the
+        // category itself, so we look up the original config to grab the name.
+        // Simpler: walk back to the JSON config and re-match by vocab+order.
+        // Easier: just re-paint based on the data-vocab and the closest input
+        // with the matching name. Since we know the name at build time, store
+        // it on the element for refresh.
+        const inputName = categoryEl.dataset.inputName;
+        if (!inputName) return;
+        const input = configForm.querySelector(`input[name="${inputName}"]`);
+        if (!input) return;
+        refreshCategoryChipStates(input, categoryEl);
+      });
+    });
   }
 
   function hasManagerConfigured() {
@@ -536,7 +811,7 @@
             </span>
           </div>
           <div class="input-with-toggle">
-            <input type="password" data-field="API_KEY" placeholder="Paste API key" autocomplete="off" />
+            <input type="password" data-field="API_KEY" placeholder="Paste API key" autocomplete="new-password" />
           </div>
         </label>
       </div>
@@ -885,10 +1160,20 @@
           streamProtectionSelect.value = 'health-check';
         }
       }
+      // Backward compat: derive NZB_DEDUP_MODE from legacy NZB_DEDUP_ENABLED
+      // if the new key isn't set. Users who had dedupe enabled (or unset) get
+      // 'standard' — the same behavior they had before this dropdown existed.
+      const dedupeModeSelect = configForm.querySelector('select[name="NZB_DEDUP_MODE"]');
+      if (dedupeModeSelect && !values.NZB_DEDUP_MODE) {
+        const legacyDedupeRaw = (values.NZB_DEDUP_ENABLED ?? 'true').toString().trim().toLowerCase();
+        const legacyDedupeOff = ['false', '0', 'off', 'no'].includes(legacyDedupeRaw);
+        dedupeModeSelect.value = legacyDedupeOff ? 'off' : 'standard';
+      }
       setupPatternPreview(); // Initialize preview with loaded values
       applyLanguageSelectionsFromHidden();
       applyQualitySelectionsFromHidden();
       applySortOrderFromHidden();
+      refreshAllChipPickers();
       applyTmdbLanguageSelectionsFromHidden();
       syncTmdbLanguageControls();
       refreshNewznabFieldNames();
@@ -898,6 +1183,8 @@
       syncManagerControls();
       syncNewznabControls();
       syncConfigWarnings();
+      // Sync sort-import block visibility from the loaded toggle state
+      if (typeof syncSortImportControls === 'function') syncSortImportControls();
       configSection.classList.remove('hidden');
       updateManifestLink(data.manifestUrl || '');
       runtimeEnvPath = data.runtimeEnvPath || null;
@@ -944,8 +1231,83 @@
     // ... other listeners ...
     if (saveButton) saveButton.addEventListener('click', handleSave);
 
-    // If we have token, auto-load? No, explicit action is better for security awareness (or per existing logic).
-    // The existing logic doesn't auto-load.
+    setupSectionCollapsers();
+  }
+
+  // Add a chevron to each top-level <section.group> header that toggles
+  // collapse state. State persists in localStorage so users don't have to
+  // re-collapse their long sections on every reload.
+  function setupSectionCollapsers() {
+    const COLLAPSE_KEY = 'usenetstreamer-admin-collapsed-sections';
+    let collapsed = null; // null = no saved state yet (first visit)
+    try {
+      const raw = localStorage.getItem(COLLAPSE_KEY);
+      if (raw !== null) collapsed = new Set(JSON.parse(raw));
+    } catch (_) { /* ignore */ }
+
+    const saveState = () => {
+      try {
+        localStorage.setItem(COLLAPSE_KEY, JSON.stringify(Array.from(collapsed)));
+      } catch (_) { /* ignore */ }
+    };
+
+    const sections = configForm.querySelectorAll('section.group');
+
+    // First-visit default: collapse everything so the page isn't a giant wall.
+    // Once the user has any saved state (even an empty array from expanding
+    // everything), we respect it.
+    if (collapsed === null) {
+      collapsed = new Set();
+      sections.forEach((section) => {
+        const heading = section.querySelector(':scope > h3');
+        if (!heading) return;
+        const key = section.id || heading.textContent.trim();
+        if (key) collapsed.add(key);
+      });
+      saveState();
+    }
+
+    sections.forEach((section) => {
+      const heading = section.querySelector(':scope > h3');
+      if (!heading) return;
+      const key = section.id || heading.textContent.trim();
+      if (!key) return;
+
+      // Add the toggle chevron to the heading
+      const btn = document.createElement('button');
+      btn.type = 'button';
+      btn.className = 'section-collapse-toggle';
+      btn.setAttribute('aria-label', 'Collapse section');
+      btn.textContent = '▾';
+      heading.appendChild(btn);
+      heading.classList.add('section-heading-collapsible');
+
+      const apply = () => {
+        const isCollapsed = collapsed.has(key);
+        section.classList.toggle('section-collapsed', isCollapsed);
+        btn.textContent = isCollapsed ? '▸' : '▾';
+        btn.setAttribute('aria-label', isCollapsed ? 'Expand section' : 'Collapse section');
+      };
+      apply();
+
+      const toggle = (event) => {
+        // Only toggle on heading/chevron clicks, not on inner-content clicks
+        if (event.target.closest('button, input, select, textarea, a, .field-grid')) {
+          if (event.target !== btn && !btn.contains(event.target)) return;
+        }
+        event.preventDefault();
+        if (collapsed.has(key)) collapsed.delete(key);
+        else collapsed.add(key);
+        saveState();
+        apply();
+      };
+      btn.addEventListener('click', toggle);
+      heading.addEventListener('click', (event) => {
+        // Heading click anywhere also toggles, unless user clicked an inline link/control
+        if (event.target.tagName === 'A' || event.target.tagName === 'BUTTON') return;
+        toggle(event);
+      });
+    });
   }
 
   // Hook into init
@@ -1155,23 +1517,66 @@
     syncHealthControls();
   }
 
+  function formatSortChain(order) {
+    return order
+      .map((entry) => {
+        const name = SORT_LABELS[entry.key] || entry.key;
+        const arrow = entry.direction === 'asc' ? ' ↑' : ' ↓';
+        return `${name}${arrow}`;
+      })
+      .join(' → ');
+  }
+
+  function updateBuilderSummary(builder) {
+    if (!builder || !builder.summaryEl) return;
+    if (builder.scope === 'global') {
+      // Global always shows something — either the user's order or the default.
+      const effective = builder.activeOrder.length > 0 ? builder.activeOrder : getDefaultSortOrder();
+      const label = formatSortChain(effective);
+      builder.summaryEl.textContent = builder.activeOrder.length > 0
+        ? `Current order: ${label}`
+        : `Current order (default): ${label}`;
+    } else {
+      // Per-type override: empty means fall back to Global — make that explicit.
+      if (builder.activeOrder.length === 0) {
+        builder.summaryEl.textContent = 'No override — inherits Global order.';
+      } else {
+        builder.summaryEl.textContent = `Override order: ${formatSortChain(builder.activeOrder)}`;
+      }
+    }
+  }
+
   function syncSortingControls() {
-    if (!sortOrderCurrentHint) return;
-    const effective = activeSortOrder.length > 0 ? activeSortOrder : getDefaultSortOrder();
-    const label = effective.map((key) => SORT_LABELS[key] || key).join(' → ');
-    sortOrderCurrentHint.textContent = activeSortOrder.length > 0
-      ? `Current sorting: ${label}`
-      : `Current sorting (default): ${label}`;
+    Object.values(sortBuilders).forEach(updateBuilderSummary);
     syncConfigWarnings();
+  }
+
+  // Only warn about Language not being top-priority when the user has picked
+  // a language that *isn't* in the everyday defaults. Picking just English or
+  // meta-tags (Original/Multi/Dual Audio/Dubbed/Unknown) doesn't materially
+  // change ranking outcomes regardless of where Language sits in the priority
+  // chain, so the warning would be noise. Picking Tamil/Korean/etc. is a
+  // deliberate non-default choice that *requires* Language at the top to
+  // actually affect the order — warn there.
+  const LANGUAGE_WARNING_IGNORE_SET = new Set(
+    ['Original', 'Multi', 'Dual Audio', 'Dubbed', 'Unknown', 'English'].map((v) => v.toLowerCase())
+  );
+
+  function hasNonDefaultLanguagePicked() {
+    if (!languageHiddenInput) return false;
+    const tokens = (languageHiddenInput.value || '')
+      .split(',')
+      .map((token) => token.trim())
+      .filter(Boolean);
+    return tokens.some((token) => !LANGUAGE_WARNING_IGNORE_SET.has(token.toLowerCase()));
   }
 
   function syncConfigWarnings() {
     const langWarning = configForm.querySelector('[data-language-priority-warning]');
     if (langWarning) {
-      const hasPreferredLanguage = languageHiddenInput && (languageHiddenInput.value || '').trim().length > 0;
       const effective = activeSortOrder.length > 0 ? activeSortOrder : getDefaultSortOrder();
-      const languageIsTop = effective[0] === 'language';
-      langWarning.classList.toggle('hidden', !(hasPreferredLanguage && !languageIsTop));
+      const languageIsTop = effective[0] && effective[0].key === 'language';
+      langWarning.classList.toggle('hidden', !(hasNonDefaultLanguagePicked() && !languageIsTop));
     }
 
     const tmdbWarning = configForm.querySelector('[data-tmdb-strict-id-warning]');
@@ -1424,22 +1829,41 @@
   }
   languageCheckboxes.forEach((checkbox) => {
     checkbox.addEventListener('change', () => {
+      // Capture click order: ticking appends to the end of the priority list
+      // (so first-clicked = top priority), unticking removes the entry and
+      // shifts everything after it up by one.
+      if (checkbox.checked) {
+        if (!languagePriorityOrder.includes(checkbox.value)) {
+          languagePriorityOrder.push(checkbox.value);
+        }
+      } else {
+        languagePriorityOrder = languagePriorityOrder.filter((v) => v !== checkbox.value);
+      }
       syncLanguageHiddenInput();
       syncSortingControls();
       syncSaveGuard();
     });
   });
 
-  sortOrderOptions.forEach((option) => {
-    option.addEventListener('change', () => {
-      const key = (option.value || '').trim().toLowerCase();
-      const baseOrder = activeSortOrder.length > 0 ? activeSortOrder : getDefaultSortOrder();
-      const next = baseOrder.filter((entry) => entry !== key);
-      if (option.checked) {
-        next.push(key);
-      }
-      setSortOrder(next);
-      syncSaveGuard();
+  // Wire change handlers per builder. Each scope owns its own activeOrder
+  // independently — toggling a key in Movies does not affect Global.
+  Object.values(sortBuilders).forEach((builder) => {
+    builder.options.forEach((option) => {
+      option.addEventListener('change', () => {
+        const key = (option.value || '').trim().toLowerCase();
+        // First-time tick on an empty per-type list starts from blank (no
+        // defaults). Global still pulls from the legacy default chain so the
+        // "remove last item to reset" path behaves the same as before.
+        const baseOrder = builder.activeOrder.length > 0
+          ? builder.activeOrder.slice()
+          : (builder.scope === 'global' ? getDefaultSortOrder() : []);
+        const next = baseOrder.filter((entry) => entry.key !== key);
+        if (option.checked) {
+          next.push({ key, direction: getDefaultDirection(key) });
+        }
+        setBuilderOrder(builder, next);
+        syncSaveGuard();
+      });
     });
   });
 
@@ -1500,6 +1924,261 @@
   if (streamingModeSelect) {
     streamingModeSelect.addEventListener('change', () => {
       syncStreamingModeControls();
+    });
+  }
+
+  // Sort config import preview (lives inside Sort & Filter section)
+  const sortImportPreviewButton = document.getElementById('sortImportPreviewButton');
+  const sortImportPreview = document.getElementById('sortImportPreview');
+  const sortImportStatus = document.getElementById('sortImportStatus');
+  const sortImportTextarea = document.getElementById('sortImportConfigTextarea');
+  const sortImportAdvanced = document.getElementById('sortImportAdvanced');
+
+  function setSortImportStatus(text, isError = false) {
+    if (!sortImportStatus) return;
+    sortImportStatus.textContent = text || '';
+    sortImportStatus.style.color = isError ? 'var(--danger, #ff8d9b)' : 'var(--text-muted)';
+  }
+
+  function renderSortImportPreview(data) {
+    if (!sortImportPreview) return;
+    if (!data) {
+      sortImportPreview.classList.add('hidden');
+      sortImportPreview.innerHTML = '';
+      return;
+    }
+    const renderList = (items) => Array.isArray(items) && items.length
+      ? '<code>' + items.map((v) => String(v).replace(/[<>&]/g, (c) => ({ '<':'&lt;', '>':'&gt;', '&':'&amp;' }[c]))).join(', ') + '</code>'
+      : '<span class="field-hint">(none)</span>';
+    const renderCriteria = (list) => Array.isArray(list) && list.length
+      ? '<code>' + list.map((c) => `${c.key} ${c.direction === 'asc' ? '↑' : '↓'}`).join(' → ') + '</code>'
+      : '<span class="field-hint">(none)</span>';
+
+    const sc = data.sortCriteria || {};
+    const pref = data.preferred || {};
+    const excl = (data.filters && data.filters.excluded) || {};
+
+    const esc = (s) => String(s).replace(/[<>&]/g, (c) => ({ '<': '&lt;', '>': '&gt;', '&': '&amp;' }[c]));
+    // Surface importer warnings (dropped/ignored keys) so the user knows what
+    // was NOT applied — otherwise the import looks fully successful when parts
+    // were silently skipped.
+    const warnings = Array.isArray(data.warnings) ? data.warnings : [];
+    const warningsHtml = warnings.length
+      ? `<div class="sort-import-warnings"><strong>⚠️ ${warnings.length} item(s) were not imported:</strong><ul>${warnings.map((w) => `<li>${esc(w)}</li>`).join('')}</ul></div>`
+      : '';
+
+    sortImportPreview.innerHTML = `
+      <h4 class="compact">Imported config</h4>
+      <div class="sort-import-preview-grid">
+        <div><strong>Sort (global):</strong> ${renderCriteria(sc.global)}</div>
+        ${sc.movies ? `<div><strong>Sort (movies):</strong> ${renderCriteria(sc.movies)}</div>` : ''}
+        ${sc.series ? `<div><strong>Sort (series):</strong> ${renderCriteria(sc.series)}</div>` : ''}
+        ${sc.anime ? `<div><strong>Sort (anime):</strong> ${renderCriteria(sc.anime)}</div>` : ''}
+        <div><strong>Preferred resolutions:</strong> ${renderList(pref.resolutions)}</div>
+        <div><strong>Preferred qualities:</strong> ${renderList(pref.qualities)}</div>
+        ${pref.languages && pref.languages.length ? `<div><strong>Preferred languages:</strong> ${renderList(pref.languages)}</div>` : ''}
+        ${pref.releaseGroups && pref.releaseGroups.length ? `<div><strong>Preferred release groups:</strong> ${renderList(pref.releaseGroups)}</div>` : ''}
+        <div><strong>Excluded qualities:</strong> ${renderList(excl.qualities)}</div>
+        <div><strong>Excluded visual tags:</strong> ${renderList(excl.visualTags)}</div>
+      </div>
+      ${warningsHtml}
+    `;
+    sortImportPreview.classList.remove('hidden');
+  }
+
+  function syncSortImportControls() {
+    if (!sortImportAdvanced) return;
+    // Auto-open the Advanced disclosure when the import textarea has content.
+    const hasJsonRemainder = sortImportTextarea && sortImportTextarea.value && sortImportTextarea.value.trim();
+    if (hasJsonRemainder) sortImportAdvanced.open = true;
+  }
+
+  // Map imported sort key names → our legacy sort builder key names so the basic
+  // priority builder reflects the imported sortCriteria.global.
+  const IMPORT_KEY_TO_LEGACY = {
+    releaseGroup: 'release_group',
+    visualTag: 'visual_tag',
+    audioTag: 'audio_tag',
+    audioChannel: 'audio_channel',
+    age: 'date',
+  };
+  function importKeyToLegacy(key) {
+    return IMPORT_KEY_TO_LEGACY[key] || key;
+  }
+
+  // Normalize imported resolution tokens to match our checkbox values.
+  const IMPORT_RESOLUTION_MAP = {
+    '4320p': '8k',
+    '2160p': '4k',
+  };
+  function normalizeImportedResolutions(list) {
+    if (!Array.isArray(list)) return [];
+    return list.map((r) => IMPORT_RESOLUTION_MAP[r] || r);
+  }
+
+  function setInputValue(name, value) {
+    const input = configForm.querySelector(`input[name="${name}"], textarea[name="${name}"]`);
+    if (input) input.value = value == null ? '' : String(value);
+  }
+
+  function setCsvInput(name, list) {
+    if (!Array.isArray(list)) return;
+    setInputValue(name, list.join(','));
+  }
+
+  function setTextareaLines(id, list) {
+    const el = document.getElementById(id);
+    if (!el || !Array.isArray(list)) return;
+    el.value = list.join('\n');
+  }
+
+
+  // Populate the basic UI form fields from a parsed sort-config import. After
+  // this runs, the form fields ARE the source of truth — the JSON textarea is
+  // left with only per-type sort data that can't be shown in the basic UI.
+  function populateFormFromImport(parsed) {
+    // Sort priority — translate imported keys to legacy keys and serialize per scope.
+    const SCOPE_TO_INPUT_NAME = {
+      global: 'NZB_SORT_ORDER',
+      movies: 'NZB_SORT_ORDER_MOVIES',
+      series: 'NZB_SORT_ORDER_SERIES',
+      anime: 'NZB_SORT_ORDER_ANIME',
+    };
+    let anyScopePopulated = false;
+    Object.entries(SCOPE_TO_INPUT_NAME).forEach(([scope, inputName]) => {
+      const hidden = configForm.querySelector(`input[name="${inputName}"]`);
+      if (!hidden) return;
+      const list = parsed.sortCriteria?.[scope];
+      if (!Array.isArray(list)) return;
+      hidden.value = list
+        .map((c) => `${importKeyToLegacy(c.key)}:${c.direction || 'desc'}`)
+        .filter((token) => !token.startsWith(':')) // drop entries whose key didn't map
+        .join(',');
+      anyScopePopulated = true;
+    });
+    if (anyScopePopulated && typeof applySortOrderFromHidden === 'function') {
+      applySortOrderFromHidden();
+    }
+
+    // Preferred lists (text inputs + language hidden picker)
+    setCsvInput('NZB_PREFERRED_QUALITIES', parsed.preferred?.qualities);
+    setCsvInput('NZB_PREFERRED_ENCODES', parsed.preferred?.encodes);
+    setCsvInput('NZB_PREFERRED_VISUAL_TAGS', parsed.preferred?.visualTags);
+    setCsvInput('NZB_PREFERRED_AUDIO_TAGS', parsed.preferred?.audioTags);
+    setCsvInput('NZB_PREFERRED_AUDIO_CHANNELS', parsed.preferred?.audioChannels);
+    setCsvInput('NZB_PREFERRED_RELEASE_GROUPS', parsed.preferred?.releaseGroups);
+
+    // Preferred languages — hidden CSV input + checkbox grid
+    if (languageHiddenInput && Array.isArray(parsed.preferred?.languages)) {
+      languageHiddenInput.value = parsed.preferred.languages.join(',');
+      if (typeof applyLanguageSelectionsFromHidden === 'function') applyLanguageSelectionsFromHidden();
+    }
+
+    // Resolution filter — translate 4320p/2160p → 8k/4k for our checkbox grid
+    if (qualityHiddenInput && Array.isArray(parsed.preferred?.resolutions) && parsed.preferred.resolutions.length) {
+      qualityHiddenInput.value = normalizeImportedResolutions(parsed.preferred.resolutions).join(',');
+      if (typeof applyQualitySelectionsFromHidden === 'function') applyQualitySelectionsFromHidden();
+    } else if (qualityHiddenInput && Array.isArray(parsed.filters?.included?.resolutions) && parsed.filters.included.resolutions.length) {
+      qualityHiddenInput.value = normalizeImportedResolutions(parsed.filters.included.resolutions).join(',');
+      if (typeof applyQualitySelectionsFromHidden === 'function') applyQualitySelectionsFromHidden();
+    }
+
+    // Excluded lists
+    const exc = parsed.filters?.excluded || {};
+    setCsvInput('NZB_EXCLUDED_QUALITIES', exc.qualities);
+    setCsvInput('NZB_EXCLUDED_VISUAL_TAGS', exc.visualTags);
+    setCsvInput('NZB_EXCLUDED_ENCODES', exc.encodes);
+    setCsvInput('NZB_EXCLUDED_AUDIO_TAGS', exc.audioTags);
+    setCsvInput('NZB_EXCLUDED_AUDIO_CHANNELS', exc.audioChannels);
+    setCsvInput('NZB_EXCLUDED_LANGUAGES', exc.languages);
+    setCsvInput('NZB_EXCLUDED_RELEASE_GROUPS', exc.releaseGroups);
+
+    // Numeric ranges
+    const ranges = parsed.filters?.ranges || {};
+    if (ranges.size?.min) setInputValue('NZB_MIN_RESULT_SIZE_GB', (ranges.size.min / (1024 * 1024 * 1024)).toFixed(2));
+    if (ranges.size?.max) setInputValue('NZB_MAX_RESULT_SIZE_GB', (ranges.size.max / (1024 * 1024 * 1024)).toFixed(2));
+    if (ranges.bitrate?.max) setInputValue('NZB_MAX_BITRATE_MBPS', (ranges.bitrate.max / 1_000_000).toFixed(2));
+
+    // Regex pattern textareas — imported configs store as { pattern, name,
+    // negate, ... }; serialize back to source strings (prefix with ! for
+    // negate) for our UI.
+    const serializePattern = (entry) => {
+      if (typeof entry === 'string') return entry;
+      if (!entry || typeof entry !== 'object') return null;
+      const src = entry.pattern;
+      if (typeof src !== 'string') return null;
+      return entry.negate ? `!${src}` : src;
+    };
+    const requiredPatterns = (parsed.filters?.requiredRegex || [])
+      .map(serializePattern).filter(Boolean);
+    const excludedPatterns = (parsed.filters?.excludedRegex || [])
+      .map(serializePattern).filter(Boolean);
+    setTextareaLines('requiredRegexTextarea', requiredPatterns);
+    setTextareaLines('excludedRegexTextarea', excludedPatterns);
+
+    // Strip the import JSON textarea — only keep per-type sort criteria that
+    // can't be shown in the basic UI. If nothing remains, clear it entirely.
+    const perTypeKeys = ['movies', 'series', 'anime', 'cached', 'uncached',
+      'cachedMovies', 'cachedSeries', 'cachedAnime',
+      'uncachedMovies', 'uncachedSeries', 'uncachedAnime'];
+    const remainder = {};
+    for (const k of perTypeKeys) {
+      if (Array.isArray(parsed.sortCriteria?.[k]) && parsed.sortCriteria[k].length) {
+        remainder[k] = parsed.sortCriteria[k];
+      }
+    }
+    if (sortImportTextarea) {
+      if (Object.keys(remainder).length) {
+        sortImportTextarea.value = JSON.stringify({ sortCriteria: remainder }, null, 2);
+      } else {
+        sortImportTextarea.value = '';
+      }
+    }
+    syncSaveGuard();
+  }
+
+  if (sortImportPreviewButton && sortImportTextarea) {
+    sortImportPreviewButton.addEventListener('click', () => {
+      const raw = sortImportTextarea.value.trim();
+      if (!raw) {
+        setSortImportStatus('Paste a sort-config JSON first.', true);
+        renderSortImportPreview(null);
+        return;
+      }
+      let payload;
+      try {
+        payload = JSON.parse(raw);
+      } catch (err) {
+        // Try base64
+        try {
+          payload = JSON.parse(atob(raw));
+        } catch (_) {
+          setSortImportStatus('Invalid JSON. Re-export and paste again.', true);
+          renderSortImportPreview(null);
+          return;
+        }
+      }
+      // POST to the preview endpoint via apiRequest so the X-Addon-Token
+      // header is set consistently with the rest of the admin calls.
+      apiRequest('/admin/api/sort-import/preview', {
+        method: 'POST',
+        body: JSON.stringify({ config: payload }),
+      })
+        .then((body) => {
+          populateFormFromImport(body);
+          renderSortImportPreview(body);
+          const remainderMsg = sortImportTextarea && sortImportTextarea.value.trim()
+            ? ' (per-type sort kept in the JSON box below)'
+            : '';
+          const warnCount = Array.isArray(body && body.warnings) ? body.warnings.length : 0;
+          const warnMsg = warnCount ? ` — ${warnCount} item(s) not supported and skipped (see below)` : '';
+          setSortImportStatus(`Imported and applied to fields above${remainderMsg}. Click Save Changes to persist.${warnMsg}`, warnCount > 0);
+          syncSortImportControls();
+        })
+        .catch((err) => {
+          setSortImportStatus(err?.message || 'Import request failed', true);
+          renderSortImportPreview(null);
+        });
     });
   }
 
@@ -1620,7 +2299,7 @@
 
     // Mixed Context: Flat keys + Nested objects
     const mockData = {
-      // Nested (AIOStreams)
+      // Nested context (matches the upstream template schema)
       stream: {
         title: 'Dune Part Two',
         proxied: true,
@@ -1825,5 +2504,7 @@
   syncNewznabControls();
   applyQualitySelectionsFromHidden();
   applyTmdbLanguageSelectionsFromHidden();
+  setupSuggestionPanels();
   syncSaveGuard();
+  setupSectionCollapsers();
 })();

@@ -165,8 +165,8 @@
                 iteration++;
             }
 
-            // Cleanup empty lines (AIOStreams behavior)
-            // Split by newline, remove lines that are purely whitespace, then rejoin
+            // Cleanup empty lines — split by newline, drop pure-whitespace
+            // lines, rejoin.
             return result.split('\n')
                 .filter(line => line.trim() !== '')
                 .join('\n');
