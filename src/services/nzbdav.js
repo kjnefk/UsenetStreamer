@@ -12,7 +12,9 @@ const diskNzbCache = require('../cache/diskNzbCache');
 const { normalizeReleaseTitle, normalizeNzbdavPath, isVideoFileName, fileMatchesEpisode, inferMimeType } = require('../utils/parsers');
 const { sleep, safeStat } = require('../utils/helpers');
 const { getDefaultDownloadUserAgent } = require('../utils/userAgent');
-const { getDownloadUserAgentForIndexer } = require('./newznab');
+const { getDownloadUserAgentForIndexer, getProxyForIndexer } = require('./newznab');
+const { getManagerProxy } = require('./indexer');
+const { proxiedGet } = require('../utils/proxyAgent');
 
 const pipelineAsync = promisify(pipeline);
 
@@ -226,17 +228,34 @@ async function addNzbToNzbdav({ downloadUrl, cachedEntry = null, category, jobLa
     throw new Error('Unable to queue NZB: no download URL available');
   }
 
+  // Resolve the proxy for this grab ONCE, before any download attempt, so a
+  // misconfigured proxy fails the whole grab (fail-closed) instead of leaking
+  // via the addurl fallback below. A matched Direct Newznab indexer uses its
+  // own proxy (the null-vs-'' distinction from getProxyForIndexer matters: a
+  // matched-but-unproxied indexer stays direct); a non-match is manager-origin
+  // and falls back to the single manager proxy. Local/LAN targets are bypassed.
+  const rowProxy = getProxyForIndexer(indexerId);
+  const resolvedProxy = rowProxy === null ? getManagerProxy() : rowProxy;
+
   // Download the NZB ourselves (with SABnzbd UA to satisfy strict indexers like SceneNZB),
   // then upload via addfile. This avoids NZBDav fetching the URL with its own UA.
   console.log(`[NZBDAV] Downloading NZB for addfile upload (${jobLabelDisplay})`);
   try {
     const downloadUa = (indexerId && getDownloadUserAgentForIndexer(indexerId)) || getDefaultDownloadUserAgent();
-    const dlResponse = await axios.get(downloadUrl, {
+    const dlConfig = {
       responseType: 'arraybuffer',
       timeout: 30000,
       headers: { 'User-Agent': downloadUa },
       validateStatus: (status) => status < 500,
-    });
+      proxy: false,
+    };
+    // With a proxy configured, follow redirects MANUALLY and re-evaluate the
+    // proxy per hop: managers (esp. Prowlarr for Usenet) 301-redirect the
+    // localhost grab to the real public indexer, and axios's auto-follow would
+    // reuse the localhost (bypassed) decision and leak that hop direct.
+    const dlResponse = resolvedProxy
+      ? await proxiedGet(downloadUrl, resolvedProxy, dlConfig)
+      : await axios.get(downloadUrl, dlConfig);
 
     if (dlResponse.status >= 400) {
       throw new Error(`NZB download returned HTTP ${dlResponse.status}`);
@@ -288,7 +307,14 @@ async function addNzbToNzbdav({ downloadUrl, cachedEntry = null, category, jobLa
     console.warn(`[NZBDAV] Download+addfile failed, falling back to addurl: ${dlError.message}`);
   }
 
-  // Last resort: let NZBDav fetch the URL itself via addurl
+  // Last resort: let NZBDav fetch the URL itself via addurl. NZBDav uses its own
+  // network stack and CANNOT honor our proxy (and would follow any manager
+  // redirect to the real indexer directly) — so when a proxy is configured for
+  // this indexer, refuse addurl (fail-closed) rather than leak.
+  if (resolvedProxy) {
+    throw new Error('[NZBDAV] Proxy configured for this indexer; refusing addurl fallback (NZBDav would fetch the indexer directly, bypassing the proxy)');
+  }
+
   console.log(`[NZBDAV] Queueing NZB via addurl for category=${category} (${jobLabelDisplay})`);
 
   const params = buildNzbdavApiParams('addurl', {

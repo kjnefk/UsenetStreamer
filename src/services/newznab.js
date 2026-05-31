@@ -2,9 +2,10 @@ const axios = require('axios');
 const { parseStringPromise: parseXmlString } = require('xml2js');
 const { stripTrailingSlashes } = require('../utils/config');
 const { getDefaultSearchUserAgent, getDefaultDownloadUserAgent } = require('../utils/userAgent');
+const { buildProxyAgents } = require('../utils/proxyAgent');
 
 const MAX_NEWZNAB_INDEXERS = 20;
-const NEWZNAB_FIELD_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAID_LIMIT', 'ZYCLOPS', 'SEARCH_UA', 'DOWNLOAD_UA'];
+const NEWZNAB_FIELD_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAID_LIMIT', 'ZYCLOPS', 'SEARCH_UA', 'DOWNLOAD_UA', 'PROXY'];
 const NEWZNAB_NUMBERED_KEYS = [];
 for (let i = 1; i <= MAX_NEWZNAB_INDEXERS; i += 1) {
   const idx = String(i).padStart(2, '0');
@@ -348,6 +349,8 @@ async function fetchNewznabCaps(config, options = {}) {
     timeout: options.timeoutMs || 12000,
     responseType: 'text',
     validateStatus: () => true,
+    proxy: false,
+    ...(buildProxyAgents(config.proxy, requestUrl) || {}),
   });
   if (response.status === 401 || response.status === 403) {
     const protectionBlock = detectProtectionBlock(response.status, contentType, body);
@@ -496,6 +499,9 @@ function buildIndexerConfig(source, idx, { includeEmpty = false } = {}) {
   const zyclopsEnabled = parseBoolean(zyclopsRaw, false);
   const searchUserAgent = toTrimmedString(source[`NEWZNAB_SEARCH_UA_${key}`]);
   const downloadUserAgent = toTrimmedString(source[`NEWZNAB_DOWNLOAD_UA_${key}`]);
+  // Per-indexer proxy URL (blank => direct). Intentionally NOT part of
+  // hasAnyValue below: a proxy alone must not materialize a phantom indexer.
+  const proxy = toTrimmedString(source[`NEWZNAB_PROXY_${key}`]);
 
   const hasAnyValue = endpoint || apiKey || apiPathRaw || name || enabledRaw !== undefined;
   if (!hasAnyValue && !includeEmpty) {
@@ -520,6 +526,7 @@ function buildIndexerConfig(source, idx, { includeEmpty = false } = {}) {
     zyclopsEnabled,
     searchUserAgent,
     downloadUserAgent,
+    proxy,
     slug,
     dedupeKey: slug || `indexer-${key}`,
     baseUrl: normalizedEndpoint ? `${normalizedEndpoint}${apiPath}` : '',
@@ -580,6 +587,36 @@ function getDownloadUserAgentForIndexer(identifier) {
     // ignore — fall back to default
   }
   return fallback;
+}
+
+/**
+ * Resolve the configured proxy URL for a Direct Newznab indexer identifier
+ * (slug/dedupeKey/displayName/name). Returns a MATCHED-SIGNAL:
+ *   - a string (possibly '') when an indexer matches the identifier — '' means
+ *     that indexer has no proxy and should connect directly.
+ *   - null when NO Direct Newznab indexer matches — the caller treats this as
+ *     "manager-origin" and falls back to the single manager proxy.
+ * The null-vs-'' distinction is load-bearing: a matched indexer the user left
+ * unproxied (returns '') must NOT inherit the manager proxy.
+ */
+function getProxyForIndexer(identifier) {
+  if (!identifier) return null;
+  const target = String(identifier).trim().toLowerCase();
+  if (!target) return null;
+  try {
+    const configs = buildIndexerConfigs(process.env, { includeEmpty: false });
+    for (const config of configs) {
+      const candidates = [config.dedupeKey, config.slug, config.displayName, config.name]
+        .filter(Boolean)
+        .map((value) => String(value).toLowerCase());
+      if (candidates.includes(target)) {
+        return config.proxy || '';
+      }
+    }
+  } catch (_) {
+    // ignore — treat as no match (manager fallback)
+  }
+  return null;
 }
 
 // Seed default caps for any enabled indexer that has no cached caps
@@ -870,6 +907,8 @@ async function fetchIndexerResults(config, plan, options) {
       'User-Agent': config.searchUserAgent || getDefaultSearchUserAgent(),
     },
     validateStatus: () => true,
+    proxy: false,
+    ...(buildProxyAgents(config.proxy, requestUrl) || {}),
   });
 
   const contentType = response.headers?.['content-type'];
@@ -1042,6 +1081,8 @@ async function testNewznabCaps(config, options = {}) {
     timeout: options.timeoutMs || 12000,
     responseType: 'text',
     validateStatus: () => true,
+    proxy: false,
+    ...(buildProxyAgents(config.proxy, requestUrl) || {}),
   });
   const contentType = response.headers?.['content-type'];
   const body = typeof response.data === 'string' ? response.data : JSON.stringify(response.data);
@@ -1091,6 +1132,7 @@ module.exports = {
   getNewznabConfigsFromValues,
   filterUsableConfigs,
   getDownloadUserAgentForIndexer,
+  getProxyForIndexer,
   searchNewznabIndexers,
   testNewznabCaps,
   validateNewznabSearch,

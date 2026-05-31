@@ -215,6 +215,20 @@ header h1 {
   min-width: 0;
 }
 
+/* Reserve a uniform two-line label-text height so inputs in the same grid row
+   line up even when one label is a single line and its neighbours wrap to two.
+   The floor (3.5em) comfortably holds two lines, so 1- and 2-line labels both
+   sit at exactly that height and their inputs align. The earlier minmax(2.7em)
+   was too short — two-line labels (~51px) grew past the 1-line floor (40.5px),
+   leaving an ~11px gap. 3.5em (~52.5px) covers two lines; `auto` lets a rare
+   3-line label grow rather than clip. Checkboxes are excluded — flex rows. */
+.field-grid label:not(.checkbox) {
+  display: grid;
+  grid-template-rows: minmax(3.5em, auto) auto;
+  grid-auto-rows: auto;
+  align-content: start;
+}
+
 .field-grid label.wide-field {
   grid-column: 1 / -1;
 }
@@ -223,6 +237,13 @@ header h1 {
    not just <label> elements (e.g. <details> override cards). */
 .field-grid > .wide-field {
   grid-column: 1 / -1;
+}
+
+/* A proxy field spans the full row (so it isn't orphaned beside empty grid
+   columns and its hint reads on fewer lines), but the input itself stays a
+   sensible width rather than stretching the whole row. */
+.field-grid label.proxy-field > input {
+  max-width: 520px;
 }
 
 .field-hint {

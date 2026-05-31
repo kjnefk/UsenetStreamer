@@ -1,7 +1,9 @@
 const axios = require('axios');
 const { triageNzbs } = require('./index');
 const { getDefaultDownloadUserAgent } = require('../../utils/userAgent');
-const { getDownloadUserAgentForIndexer } = require('../newznab');
+const { getDownloadUserAgentForIndexer, getProxyForIndexer } = require('../newznab');
+const { getManagerProxy } = require('../indexer');
+const { proxiedGet } = require('../../utils/proxyAgent');
 
 const DEFAULT_TIME_BUDGET_MS = 40000;
 const DEFAULT_MAX_CANDIDATES = 25;
@@ -333,7 +335,12 @@ async function triageAndRank(nzbResults, options = {}) {
 
           const downloadUa = getDownloadUserAgentForIndexer(candidate.indexerId || candidate.indexerName)
             || getDefaultDownloadUserAgent();
-          const response = await axios.get(downloadUrl, {
+          // Same proxy resolution as the NZBDav grab: matched Direct Newznab
+          // indexer uses its own proxy (null vs '' matters), non-match is
+          // manager-origin and uses the manager proxy.
+          const rowProxy = getProxyForIndexer(candidate.indexerId || candidate.indexerName);
+          const resolvedProxy = rowProxy === null ? getManagerProxy() : rowProxy;
+          const dlConfig = {
             responseType: 'text',
             timeout: downloadTimeoutMs,
             signal: abortController.signal,
@@ -342,7 +349,16 @@ async function triageAndRank(nzbResults, options = {}) {
               'User-Agent': downloadUa,
             },
             transitional: { silentJSONParsing: true, forcedJSONParsing: false },
-          }).finally(() => {
+            proxy: false,
+          };
+          // Proxy configured => follow redirects manually, re-evaluating the
+          // proxy per hop (a manager 301 to the real indexer must ride the
+          // proxy, not leak direct); fail-closed on a bad proxy. No proxy =>
+          // normal auto-follow.
+          const response = await (resolvedProxy
+            ? proxiedGet(downloadUrl, resolvedProxy, dlConfig)
+            : axios.get(downloadUrl, dlConfig)
+          ).finally(() => {
             clearTimeout(hardTimeoutTimer);
           });
           if (typeof response.data !== 'string' || response.data.length === 0) {

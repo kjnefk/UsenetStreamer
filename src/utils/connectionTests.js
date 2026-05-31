@@ -2,6 +2,7 @@ const axios = require('axios');
 const FormData = require('form-data');
 const fs = require('fs');
 const path = require('path');
+const { buildProxyAgents } = require('./proxyAgent');
 const {
   getNewznabConfigsFromValues,
   filterUsableConfigs,
@@ -136,10 +137,13 @@ async function testIndexerConnection(values) {
 
   if (managerType === 'prowlarr') {
     if (!apiKey) throw new Error('API key is required for Prowlarr');
-    const response = await axios.get(`${baseUrl}/api/v1/system/status`, {
+    const statusUrl = `${baseUrl}/api/v1/system/status`;
+    const response = await axios.get(statusUrl, {
       headers: { 'X-Api-Key': apiKey },
       timeout,
       validateStatus: () => true,
+      proxy: false,
+      ...(buildProxyAgents(values?.INDEXER_MANAGER_PROXY, statusUrl) || {}),
     });
     if (response.status === 200) {
       const version = response.data?.version || response.data?.appVersion || null;
@@ -155,12 +159,15 @@ async function testIndexerConnection(values) {
   const params = { t: 'caps', o: 'json' };
   if (apiKey) params.apikey = apiKey;
   
-  const response = await axios.get(`${baseUrl}/api`, {
+  const hydraUrl = `${baseUrl}/api`;
+  const response = await axios.get(hydraUrl, {
     params,
     timeout,
     validateStatus: () => true,
+    proxy: false,
+    ...(buildProxyAgents(values?.INDEXER_MANAGER_PROXY, hydraUrl) || {}),
   });
-  
+
   if (response.status === 200) {
     // Successful response from NZBHydra API
     // Try to extract version from various possible response formats

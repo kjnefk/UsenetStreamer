@@ -66,7 +66,7 @@
   let loadedSortMode = 'quality_then_size';
 
   const MAX_NEWZNAB_INDEXERS = 20;
-  const NEWZNAB_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAID_LIMIT', 'ZYCLOPS', 'SEARCH_UA', 'DOWNLOAD_UA'];
+  const NEWZNAB_SUFFIXES = ['ENDPOINT', 'API_KEY', 'API_PATH', 'NAME', 'INDEXER_ENABLED', 'PAID', 'PAID_LIMIT', 'ZYCLOPS', 'SEARCH_UA', 'DOWNLOAD_UA', 'PROXY'];
 
   // Canonical option vocabularies for preferred/excluded chip helpers.
   // Aligned with the import schema so imported configs map 1:1. Release groups
@@ -830,6 +830,10 @@
             <input type="text" data-field="DOWNLOAD_UA" placeholder="SABnzbd/4.5.5" />
             <span class="field-hint">User-Agent sent when downloading the NZB file (used by health checks and NZBDav uploads). Leave blank to use the default.</span>
           </label>
+          <label>Indexer Proxy (Optional)
+            <input type="text" data-field="PROXY" placeholder="socks5://gluetun:8388 or http://gluetun:8888" autocomplete="new-password" />
+            <span class="field-hint">Optional — usually not needed. Only set this if this indexer has blocked your server's IP (common on cloud/VPS hosts). Routes this indexer's search, caps, test and NZB downloads through the proxy. Leave blank for a direct connection. Local/LAN targets are bypassed; use socks5h:// to resolve DNS at the proxy. Need one? Webshare (webshare.io) offers free proxies.</span>
+          </label>
           <label class="checkbox">
             <input type="checkbox" data-field="ZYCLOPS" />
             <span>Enable Zyclops Health Check Proxy</span>
@@ -892,8 +896,10 @@
     if (advancedDetails) {
       const searchUaInput = row.querySelector('[data-field="SEARCH_UA"]');
       const downloadUaInput = row.querySelector('[data-field="DOWNLOAD_UA"]');
+      const proxyInput = row.querySelector('[data-field="PROXY"]');
       const hasOverride = (searchUaInput && searchUaInput.value && searchUaInput.value.trim())
         || (downloadUaInput && downloadUaInput.value && downloadUaInput.value.trim())
+        || (proxyInput && proxyInput.value && proxyInput.value.trim())
         || (zyclopsCheck && zyclopsCheck.checked);
       if (hasOverride) advancedDetails.open = true;
     }

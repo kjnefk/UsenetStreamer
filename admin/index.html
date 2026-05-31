@@ -68,7 +68,8 @@
               </select>
             </label>
             <label data-manager-field>Manager URL
-              <input name="INDEXER_MANAGER_URL" type="url" placeholder="http://localhost:9696" />
+              <input name="INDEXER_MANAGER_URL" type="url" placeholder="http://localhost:9696 or http://prowlarr:9696" />
+              <span class="field-hint">In Docker, use the service/container name instead of localhost — e.g. http://prowlarr:9696 (Prowlarr) or http://nzbhydra:5076 (NZBHydra). localhost only works if the manager runs in the same container as the addon.</span>
             </label>
             <label data-manager-field>API Key
               <input name="INDEXER_MANAGER_API_KEY" type="password" autocomplete="new-password" />
@@ -89,6 +90,10 @@
               <input name="INDEXER_MANAGER_STRICT_ID_MATCH" type="checkbox" />
               <span>Strict ID Matching Only</span>
               <span class="field-hint">Applies to both manager and direct Newznab searches. ID-only mode skips text queries.</span>
+            </label>
+            <label data-manager-field class="wide-field proxy-field">Manager Proxy (Optional)
+              <input name="INDEXER_MANAGER_PROXY" type="text" placeholder="socks5://gluetun:8388 or http://gluetun:8888" autocomplete="new-password" />
+              <span class="field-hint">Optional — usually not needed. Only set this if an indexer has blocked your server's IP (common on cloud/VPS hosts). This proxies your NZB grabs only: Prowlarr/NZBHydra redirect each download to the real indexer, and this routes that fetch through the proxy. Searches are run by the manager itself — so to hide search traffic too, you must also add a proxy inside Prowlarr/NZBHydra (their own proxy settings). Leave blank for a direct connection. Local/LAN targets are bypassed automatically; use socks5h:// to resolve DNS at the proxy. Need one? Webshare (webshare.io) offers free proxies.</span>
             </label>
           </div>
           <div class="inline-actions" data-manager-field>
@@ -644,13 +649,14 @@ health'></textarea>
           <h3>NZBDav Connection</h3>
           <div class="field-grid">
             <label>NZBDav URL
-              <input name="NZBDAV_URL" type="url" placeholder="http://localhost:3000" />
+              <input name="NZBDAV_URL" type="url" placeholder="http://localhost:3000 or http://nzbdav:3000" />
+              <span class="field-hint">In Docker, use the service/container name instead of localhost — e.g. http://nzbdav:3000. localhost only works if NZBDav runs in the same container as the addon.</span>
             </label>
             <label>NZBDav API Key
               <input name="NZBDAV_API_KEY" type="password" autocomplete="new-password" />
             </label>
             <label>WebDAV URL
-              <input name="NZBDAV_WEBDAV_URL" type="url" placeholder="http://localhost:3000" />
+              <input name="NZBDAV_WEBDAV_URL" type="url" placeholder="http://localhost:3000 or http://nzbdav:3000" />
             </label>
             <label>WebDAV User
               <input name="NZBDAV_WEBDAV_USER" type="text" />

@@ -1,6 +1,7 @@
 // Indexer service - Prowlarr and NZBHydra integration
 const axios = require('axios');
 const { getPublishMetadataFromResult, areReleasesWithinDays } = require('../utils/publishInfo');
+const { buildProxyAgents } = require('../utils/proxyAgent');
 
 // Configuration (runtime reloadable)
 let INDEXER_MANAGER = 'prowlarr';
@@ -9,6 +10,10 @@ let INDEXER_MANAGER_API_KEY = '';
 let INDEXER_MANAGER_INDEXERS = '-1';
 let INDEXER_MANAGER_CACHE_MINUTES = 10;
 let INDEXER_MANAGER_BASE_URL = '';
+// Single proxy for ALL indexer-manager traffic (search + .nzb grabs that come
+// from the manager). Blank => direct. Per-indexer proxies live on Direct
+// Newznab rows instead (NEWZNAB_PROXY_<NN>).
+let INDEXER_MANAGER_PROXY = '';
 
 function reloadConfig() {
   INDEXER_MANAGER = (process.env.INDEXER_MANAGER || 'prowlarr').trim().toLowerCase();
@@ -30,9 +35,16 @@ function reloadConfig() {
     return Number.isFinite(raw) && raw >= 0 ? raw : 10;
   })();
   INDEXER_MANAGER_BASE_URL = INDEXER_MANAGER_URL.replace(/\/+$/, '');
+  INDEXER_MANAGER_PROXY = (process.env.INDEXER_MANAGER_PROXY || '').trim();
 }
 
 reloadConfig();
+
+// Expose the manager proxy so the .nzb grab sites can fall back to it for
+// manager-origin downloads (which don't map to a Direct Newznab slug).
+function getManagerProxy() {
+  return INDEXER_MANAGER_PROXY;
+}
 const PROWLARR_SEARCH_LIMIT = 1000;
 const TRIAGE_DECISION_SHARING_WINDOW_DAYS = 14;
 
@@ -92,7 +104,9 @@ async function executeProwlarrSearch(plan) {
   console.log('[PROWLARR] Requesting search', { url: fullUrl });
   const response = await axios.get(fullUrl, {
     headers: { 'X-Api-Key': INDEXER_MANAGER_API_KEY },
-    timeout: 60000
+    timeout: 60000,
+    proxy: false,
+    ...(buildProxyAgents(INDEXER_MANAGER_PROXY, fullUrl) || {}),
   });
   return Array.isArray(response.data) ? response.data : [];
 }
@@ -344,9 +358,12 @@ function normalizeHydraResults(data) {
 
 async function executeNzbhydraSearch(plan) {
   const params = buildHydraSearchParams(plan);
-  const response = await axios.get(`${INDEXER_MANAGER_BASE_URL}/api`, {
+  const url = `${INDEXER_MANAGER_BASE_URL}/api`;
+  const response = await axios.get(url, {
     params,
-    timeout: 60000
+    timeout: 60000,
+    proxy: false,
+    ...(buildProxyAgents(INDEXER_MANAGER_PROXY, url) || {}),
   });
   return normalizeHydraResults(response.data);
 }
@@ -407,5 +424,6 @@ module.exports = {
   executeNzbhydraSearch,
   buildProwlarrSearchParams,
   buildHydraSearchParams,
+  getManagerProxy,
   reloadConfig,
 };

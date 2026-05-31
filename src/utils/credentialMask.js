@@ -14,6 +14,22 @@ const SENSITIVE_KEYS = new Set([
 
 const SENSITIVE_KEY_PATTERNS = [/^NEWZNAB_API_KEY_\d+$/];
 
+// Indexer proxy URLs (manager + per-row). Unlike API keys these are masked
+// CONDITIONALLY — only when the URL embeds credentials (user:pass@host) — so a
+// plain proxy like socks5://gluetun:8388 stays visible/editable in the admin UI.
+const PROXY_KEYS = new Set(['INDEXER_MANAGER_PROXY']);
+const PROXY_KEY_PATTERNS = [/^NEWZNAB_PROXY_\d+$/];
+
+function isProxyKey(key) {
+  if (PROXY_KEYS.has(key)) return true;
+  return PROXY_KEY_PATTERNS.some((rx) => rx.test(key));
+}
+
+// A proxy URL carries credentials when it has a userinfo segment before the host.
+function proxyValueHasCredentials(value) {
+  return /\/\/[^/@]+@/.test(String(value || ''));
+}
+
 function isSensitiveKey(key) {
   if (SENSITIVE_KEYS.has(key)) return true;
   return SENSITIVE_KEY_PATTERNS.some((rx) => rx.test(key));
@@ -22,7 +38,15 @@ function isSensitiveKey(key) {
 function maskSensitiveValues(values) {
   const masked = { ...values };
   Object.keys(masked).forEach((key) => {
-    if (isSensitiveKey(key) && masked[key]) {
+    if (!masked[key]) return;
+    if (isProxyKey(key)) {
+      // Only hide a proxy URL when it actually contains credentials.
+      if (proxyValueHasCredentials(masked[key])) {
+        masked[key] = CREDENTIAL_MASK_SENTINEL;
+      }
+      return;
+    }
+    if (isSensitiveKey(key)) {
       masked[key] = CREDENTIAL_MASK_SENTINEL;
     }
   });
@@ -45,6 +69,8 @@ module.exports = {
   SENSITIVE_KEYS,
   SENSITIVE_KEY_PATTERNS,
   isSensitiveKey,
+  isProxyKey,
+  proxyValueHasCredentials,
   maskSensitiveValues,
   unsentinelValues,
 };
