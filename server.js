@@ -102,7 +102,7 @@ setInterval(() => {
 
 const app = express();
 let currentPort = Number(process.env.PORT || 7000);
-const ADDON_VERSION = '1.7.13';
+const ADDON_VERSION = '1.8.0';
 const DEFAULT_ADDON_NAME = 'UsenetStreamer';
 let serverInstance = null;
 const SERVER_HOST = '0.0.0.0';
@@ -1464,6 +1464,17 @@ const VIDEO_MIME_MAP = new Map([
   ['.mpeg', 'video/mpeg']
 ]);
 
+// Profile-aware addon display name, matching the manifest naming logic: a profile
+// that merely inherits the base name shows as "{base} ({profile})"; a genuinely
+// custom name (different from the base) is used verbatim. Used for the per-stream
+// "addon" label so it stays consistent with the installed addon's name.
+function resolveAddonDisplayName(profileEff) {
+  const base = ADDON_NAME || DEFAULT_ADDON_NAME;
+  if (!profileEff || !profileEff.profile) return base;
+  const own = ((profileEff.profile.overrides && profileEff.profile.overrides.ADDON_NAME) || '').trim();
+  return (own && own !== base) ? own : `${base} (${profileEff.profile.name})`;
+}
+
 // Route handlers created from extracted factory modules
 function getRouteConfig(profileName) {
   const base = {
@@ -1489,7 +1500,11 @@ function getRouteConfig(profileName) {
       : base.NZBDAV_HISTORY_CATALOG_LIMIT,
     profileSlug: eff.profile.slug,
     profileDisplayName: eff.profile.name,
-    profileNameOverridden: Boolean(ov.ADDON_NAME && ov.ADDON_NAME.trim()),
+    // A profile is treated as having a fully-custom name (shown verbatim, with no
+    // "(profile)" suffix) only when its name DIFFERS from the base/default name. A
+    // profile that merely inherited the base name — e.g. the create-profile form
+    // pre-filled "UNS" — still gets the "{base} (profile)" form for consistency.
+    profileNameOverridden: Boolean(ov.ADDON_NAME && ov.ADDON_NAME.trim() && ov.ADDON_NAME.trim() !== base.ADDON_NAME),
   };
 }
 
@@ -3770,7 +3785,7 @@ async function streamHandler(req, res) {
       // quality summary now part of name; keep tags focused on status/language/size
       if (languageLabel) tags.push(`🌐 ${languageLabel}`);
       if (sizeString) tags.push(sizeString);
-      const addonLabel = (profileEff ? profileEff.config.ADDON_NAME : ADDON_NAME) || DEFAULT_ADDON_NAME;
+      const addonLabel = resolveAddonDisplayName(profileEff);
 
       const tagsString = tags.filter(Boolean).join(' • ');
 
@@ -4165,7 +4180,7 @@ async function streamHandler(req, res) {
         smartPlayTitle = `${searchTitle} (${releaseYear})`;
       }
 
-      const addonLabel = (profileEff ? profileEff.config.ADDON_NAME : ADDON_NAME) || DEFAULT_ADDON_NAME;
+      const addonLabel = resolveAddonDisplayName(profileEff);
       const smartPlayDescription = cachedSmartPlayEligible
         ? `🎬 ${smartPlayTitle}\n✅ Auto-selects the best healthy NZB\n⚡ Health check complete — instant playback`
         : `🎬 ${smartPlayTitle}\n✅ Auto-selects the best healthy NZB\n🔄 Health check running in background...`;

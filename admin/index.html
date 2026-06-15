@@ -131,14 +131,14 @@
               <input name="NZB_TRIAGE_PRIORITY_INDEXER_LIMITS" type="text" placeholder="6,6" />
               <span class="field-hint">Max NZBs to grab per request from each paid indexer above. Same order as the indexer list. Default: 6 per indexer.</span>
             </label>
+            <label data-manager-field class="wide-field proxy-field">Manager Proxy (Optional)
+              <input name="INDEXER_MANAGER_PROXY" type="text" placeholder="socks5://gluetun:8388 or http://gluetun:8888" autocomplete="new-password" />
+              <span class="field-hint">If you want to use a proxy, it's best set up inside NZBHydra/Prowlarr with redirect turned off. If you can't turn redirect off, add the same proxy here as well.</span>
+            </label>
             <label class="checkbox">
               <input name="INDEXER_MANAGER_STRICT_ID_MATCH" type="checkbox" />
               <span>Strict ID Matching Only</span>
-              <span class="field-hint">Applies to both manager and direct Newznab searches. ID-only mode skips text queries.</span>
-            </label>
-            <label data-manager-field class="wide-field proxy-field">Manager Proxy (Optional)
-              <input name="INDEXER_MANAGER_PROXY" type="text" placeholder="socks5://gluetun:8388 or http://gluetun:8888" autocomplete="new-password" />
-              <span class="field-hint">Optional — usually not needed. Only set this if an indexer has blocked your server's IP (common on cloud/VPS hosts). This proxies your NZB grabs only: Prowlarr/NZBHydra redirect each download to the real indexer, and this routes that fetch through the proxy. Searches are run by the manager itself — so to hide search traffic too, you must also add a proxy inside Prowlarr/NZBHydra (their own proxy settings). Leave blank for a direct connection. Local/LAN targets are bypassed automatically; use socks5h:// to resolve DNS at the proxy. Need one? Webshare (webshare.io) offers free proxies.</span>
+              <span class="field-hint">Enable this if you're seeing incorrect or unrelated results — it matches strictly by ID, so only the correct title is returned. Applies to both manager and direct Newznab searches; ID-only mode skips all text queries (localized/alternate-title searches won't run).</span>
             </label>
           </div>
           <p class="hint hidden" data-direct-newznab-note>Direct Newznab selected — add and manage your indexers in the <strong>Direct Newznab Indexers</strong> section just below.</p>
@@ -212,7 +212,7 @@
             </label>
             <label class="checkbox">
               <input name="EASYNEWS_TREAT_AS_INDEXER" type="checkbox" />
-              <span>Enable Health Checks (often slows your results)</span>
+              <span>Enable Health Checks for Easynews (often slows your initial search results, as Easynews downloads are slower)</span>
             </label>
           </div>
           <div class="inline-actions">
@@ -609,7 +609,7 @@
             <div class="advanced-filters" style="margin-top: 1rem;">
               <div class="advanced-filters-header">
                 <span>Import Sort Config</span>
-                <span class="field-hint">Paste an exported sort/filter config JSON and click <strong>Import &amp; Apply</strong>. We fill in the sorting priority, preferred lists, exclusions, ranges, and Regex tiers above and below with the imported values. Then click <strong>Save Changes</strong>. <a href="help.html#sorting" target="_blank" rel="noopener">Learn more</a></span>
+                <span class="field-hint">If you wrap this addon inside an aggregator like AIOStreams, you can mirror its sort/filter setup here: paste the exported backup/config JSON and click <strong>Import &amp; Apply</strong>. We fill in the sorting priority, preferred lists, exclusions, ranges, and Regex tiers above and below with the imported values. Then click <strong>Save Changes</strong>. <a href="help.html#sorting" target="_blank" rel="noopener">Learn more</a></span>
               </div>
               <div class="field-grid">
                 <label class="wide-field">Sort Config JSON

@@ -859,11 +859,11 @@
         <summary>Advanced settings</summary>
         <div class="field-grid">
           <label>Search User-Agent
-            <input type="text" data-field="SEARCH_UA" placeholder="Prowlarr/2.0.5" />
+            <input type="text" data-field="SEARCH_UA" placeholder="Prowlarr/2.4.0.5397 (ubuntu 22.04)" />
             <span class="field-hint">User-Agent sent on Newznab API search calls. Leave blank to use the default.</span>
           </label>
           <label>Download User-Agent
-            <input type="text" data-field="DOWNLOAD_UA" placeholder="SABnzbd/4.5.5" />
+            <input type="text" data-field="DOWNLOAD_UA" placeholder="SABnzbd/5.0.3" />
             <span class="field-hint">User-Agent sent when downloading the NZB file (used by health checks and NZBDav uploads). Leave blank to use the default.</span>
           </label>
           <label>Indexer Proxy (Optional)
@@ -2025,6 +2025,7 @@
     showOverrideToggles(false);
     populateForm(lastGlobalValues);
     refreshFormBuilders();
+    syncProfileAddonNamePlaceholder();
     if (saveButton) saveButton.textContent = 'Save Changes';
   }
 
@@ -2072,6 +2073,15 @@
       const t = section.querySelector('[data-profile-override-toggle]');
       setSectionOverride(section, Boolean(t && t.checked));
     });
+    // Don't pre-fill the inherited base name into the field — a blank field means
+    // "inherit", surfaced via the placeholder as "{base} ({profile})". Keep only a
+    // genuinely custom name (one that differs from the base default name).
+    const profileNameField = configForm.querySelector('[name="ADDON_NAME"]');
+    if (profileNameField) {
+      const base = (lastGlobalValues.ADDON_NAME || '').trim() || 'UsenetStreamer';
+      if (isNew || (profileNameField.value || '').trim() === base) profileNameField.value = '';
+    }
+    syncProfileAddonNamePlaceholder();
     updateProfileInstallHint();
     if (saveButton) { saveButton.disabled = false; saveButton.textContent = isNew ? 'Create profile' : 'Save profile'; }
   }
@@ -2083,6 +2093,25 @@
     const url = currentManifestUrl.replace(/\/manifest\.json([^/]*)$/, `/${slug}/manifest.json$1`);
     profileInstallHint.innerHTML = `Install this profile in Stremio: <code>${escapeHtmlText(url)}</code> — install only <strong>one</strong> profile per Stremio account (each installed profile makes this addon run again on every title).`;
     profileInstallHint.classList.remove('hidden');
+  }
+
+  // For a profile, the Addon Display Name field is left blank when inheriting; the
+  // effective Stremio name ("{base} ({profile})") is shown as the placeholder +
+  // hint, so it's clear a blank field still produces a distinct, suffixed name.
+  // (Server appends the "(profile)" suffix unless a genuinely custom name is set.)
+  function syncProfileAddonNamePlaceholder() {
+    const nameInput = configForm.querySelector('[name="ADDON_NAME"]');
+    if (!nameInput) return;
+    const hint = nameInput.closest('label') && nameInput.closest('label').querySelector('.field-hint');
+    if (currentProfileSlug === null) {
+      nameInput.placeholder = 'UsenetStreamer';
+      if (hint) hint.textContent = 'Appears in Stremio as the addon title.';
+      return;
+    }
+    const base = (lastGlobalValues.ADDON_NAME || '').trim() || 'UsenetStreamer';
+    const effective = `${base} (${(profileNameInput.value || '').trim() || 'profile name'})`;
+    nameInput.placeholder = effective;
+    if (hint) hint.textContent = `Leave blank to inherit — appears in Stremio as “${effective}”. Enter a name to fully override.`;
   }
 
   function gatherProfileOverrides() {
@@ -2113,8 +2142,15 @@
       if (currentProfileSlug && currentProfileSlug !== '__new__') body.slug = currentProfileSlug;
       const result = await apiRequest('/admin/api/profiles', { method: 'POST', body: JSON.stringify(body) });
       const saved = result && result.profile;
-      saveStatus.textContent = `Profile "${name}" saved.`;
-      if (saved && saved.slug) currentProfileSlug = saved.slug;
+      // Show this profile's own manifest URL at the bottom too (like the default
+      // profile does), so it's where users expect it — not only the top hint.
+      const savedSlug = saved && saved.slug;
+      const profileManifestUrl = (savedSlug && currentManifestUrl)
+        ? currentManifestUrl.replace(/\/manifest\.json([^/]*)$/, `/${savedSlug}/manifest.json$1`)
+        : '';
+      const urlNote = profileManifestUrl ? `Manifest URL: ${profileManifestUrl}. ` : '';
+      saveStatus.textContent = `${urlNote}Profile "${name}" saved — settings apply instantly, no restart needed.`;
+      if (savedSlug) currentProfileSlug = savedSlug;
       await loadProfiles();
       const justSaved = saved && saved.slug ? knownProfiles.find((p) => p.slug === saved.slug) : null;
       if (justSaved) enterProfileMode(justSaved, false); else renderProfileTabs();
@@ -2144,7 +2180,7 @@
 
   if (profileTabs) {
     deleteProfileBtn.addEventListener('click', deleteCurrentProfile);
-    profileNameInput.addEventListener('input', updateProfileInstallHint);
+    profileNameInput.addEventListener('input', () => { updateProfileInstallHint(); syncProfileAddonNamePlaceholder(); });
   }
 
   const testButtons = configForm.querySelectorAll('button[data-test]');

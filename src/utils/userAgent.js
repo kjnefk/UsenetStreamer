@@ -1,5 +1,9 @@
-const DEFAULT_SEARCH_UA = 'Prowlarr/2.0.5';
-const DEFAULT_DOWNLOAD_UA = 'SABnzbd/4.5.5';
+// Mimic current real clients so indexers accept the requests. Keep these in
+// step with the latest Prowlarr (search) / SABnzbd (download) releases.
+//   - Prowlarr (Servarr) sends "{App}/{fullVersion} ({osName} {osVersion})".
+//   - SABnzbd sends "SABnzbd/{version}" (no OS suffix).
+const DEFAULT_SEARCH_UA = 'Prowlarr/2.4.0.5397 (ubuntu 22.04)';
+const DEFAULT_DOWNLOAD_UA = 'SABnzbd/5.0.3';
 
 function getDefaultSearchUserAgent() {
   return DEFAULT_SEARCH_UA;
