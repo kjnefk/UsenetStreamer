@@ -30,6 +30,31 @@ function sanitizeStrictSearchPhrase(text) {
     .trim();
 }
 
+// Turn a human/metadata title (e.g. a TMDb title) into the token string we send
+// to indexers/Easynews for a TEXT search. Release names are whitespace/dot
+// separated alphanumerics, so a literal title like
+//   "Earth, Wind & Fire (To Be Celestial vs. That's the Weight of the World)"
+// must become
+//   "Earth Wind and Fire To Be Celestial vs Thats the Weight of the World"
+// or the indexer returns nothing. Rules:
+//   - fold accents/umlauts to ASCII (matches how releases spell them)
+//   - apostrophes are REMOVED, not spaced ("That's" → "Thats", not "That s")
+//   - "&" → "and" (so "Wind & Fire" → "Wind and Fire")
+//   - every other punctuation/symbol → space ("Love/Hate" → "Love Hate",
+//     commas, parens, colons, dots, hyphens, music glyphs, …)
+//   - collapse whitespace; case is preserved (indexer text search is
+//     case-insensitive). The result lines up with sanitizeStrictSearchPhrase so
+//     the query we send and the phrase we match on stay consistent.
+function cleanSearchTitle(title) {
+  if (!title) return '';
+  return foldAccents(String(title))
+    .replace(/['‘’ʼ]/g, '') // straight/curly/modifier apostrophes → removed
+    .replace(/&/g, ' and ')
+    .replace(/[^\p{L}\p{N}\s]/gu, ' ')          // any other punctuation/symbol → space
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
 function matchesStrictSearch(title, strictPhrase) {
   if (!strictPhrase) return true;
   const candidate = sanitizeStrictSearchPhrase(title);
@@ -111,6 +136,7 @@ module.exports = {
   TITLE_SIMILARITY_THRESHOLD,
   foldAccents,
   sanitizeStrictSearchPhrase,
+  cleanSearchTitle,
   matchesStrictSearch,
   normaliseTitle,
   levenshteinDistance,

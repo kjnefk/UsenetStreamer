@@ -68,7 +68,7 @@ const { normalizeReleaseTitle, parseRequestedEpisode, isVideoFileName, fileMatch
 const { sanitizeErrorForClient, TRIAGE_FINAL_STATUSES, isTriageFinalStatus, buildStreamCacheKey, restoreTriageDecisions, extractTriageOverrides, sleep, annotateNzbResult, applyMaxSizeFilter, prepareSortedResults, getPreferredLanguageMatch, getPreferredLanguageMatches, triageStatusRank, buildTriageTitleMap, prioritizeTriageCandidates, triageDecisionsMatchStatuses, sanitizeDecisionForCache, serializeFinalNzbResults, restoreFinalNzbResults, safeStat, formatStreamTitle } = require('./src/utils/helpers');
 const { maskSensitiveValues, unsentinelValues, CREDENTIAL_MASK_SENTINEL, SENSITIVE_KEYS, SENSITIVE_KEY_PATTERNS, isSensitiveKey } = require('./src/utils/credentialMask');
 const { buildTriageNntpConfig, buildNntpServersArray } = require('./src/services/triage/nntpConfig');
-const { sanitizeStrictSearchPhrase, matchesStrictSearch, normaliseTitle, levenshteinRatio, titleSimilarityCheck, TITLE_SIMILARITY_THRESHOLD } = require('./src/utils/stringUtils');
+const { sanitizeStrictSearchPhrase, cleanSearchTitle, matchesStrictSearch, normaliseTitle, levenshteinRatio, titleSimilarityCheck, TITLE_SIMILARITY_THRESHOLD } = require('./src/utils/stringUtils');
 const { formatResolutionBadge, extractQualityFeatureBadges, summarizeNewznabPlan } = require('./src/utils/formatters');
 const { normalizeUsenetGroup, extractUsenetGroup, extractFileCount, parseAllowedResolutionList, parseResolutionLimitValue, isResultFromPaidIndexer, dedupeResultsByTitle, DEDUPE_MODES } = require('./src/utils/resultUtils');
 
@@ -2428,7 +2428,11 @@ async function streamHandler(req, res) {
             console.log(`${INDEXER_LOG_PREFIX} Skipping year-only text plan (no title)`);
           } else {
             const rawFallback = textQueryCandidate.trim();
-            textQueryFallbackValue = tmdbService.normalizeToAscii(rawFallback);
+            // Strip punctuation the indexer can't match ("Earth, Wind & Fire
+            // (...)" → "Earth Wind and Fire ..."); the year/SxxEyy suffix is
+            // alphanumeric so it survives. ASCII-normalize first (handles CJK /
+            // transliteration), then clean.
+            textQueryFallbackValue = cleanSearchTitle(tmdbService.normalizeToAscii(rawFallback));
             if (textQueryFallbackValue && textQueryFallbackValue !== rawFallback) {
               console.log(`${INDEXER_LOG_PREFIX} Normalized text query to ASCII`, { original: rawFallback, normalized: textQueryFallbackValue });
             }
@@ -2487,7 +2491,11 @@ async function streamHandler(req, res) {
               return;
             }
 
-            let normalizedQuery = normalizedBase;
+            // Strip punctuation so the query matches release-name tokens
+            // ("Earth, Wind & Fire (...)" → "Earth Wind and Fire ..."); ratio
+            // guard above already ran on the uncleaned title.
+            let normalizedQuery = cleanSearchTitle(normalizedBase);
+            if (!normalizedQuery) return;
             if (type === 'movie' && Number.isFinite(releaseYear)) {
               normalizedQuery = `${normalizedQuery} ${releaseYear}`;
             } else if (type === 'series' && Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
@@ -2510,7 +2518,8 @@ async function streamHandler(req, res) {
           const searchableTitles = animeDatabase.getSearchableTitles(animeResolved.titles);
           console.log(`[ANIME] Adding up to ${searchableTitles.length} anime title search plans`);
           for (const titleObj of searchableTitles) {
-            let normalizedQuery = titleObj.asciiTitle;
+            let normalizedQuery = cleanSearchTitle(titleObj.asciiTitle);
+            if (!normalizedQuery) continue;
             if (type === 'movie' && Number.isFinite(releaseYear)) {
               normalizedQuery = `${normalizedQuery} ${releaseYear}`;
             } else if (type === 'series' && Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {

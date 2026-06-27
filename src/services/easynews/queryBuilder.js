@@ -1,4 +1,4 @@
-const { foldAccents } = require('../../utils/stringUtils');
+const { foldAccents, cleanSearchTitle } = require('../../utils/stringUtils');
 
 function appendEpisodeSuffix(title, { type, releaseYear, seasonNum, episodeNum }) {
   if (!title) return '';
@@ -54,14 +54,16 @@ function buildEasynewsSearchParams({
     // form release names use, then ASCII-normalize for anything left.
     let normalized = normalizeToAscii(foldAccents(rawTitle.trim()));
     if (!normalized) return;
-    // Slash/backslash in a title (e.g. "Love/Hate") isn't a word boundary to
-    // Easynews search, so the literal query returns 0 hits. Treat them as
-    // spaces so the query matches dotted release names ("Love.Hate...").
-    normalized = normalized.replace(/[/\\]+/g, ' ').replace(/\s+/g, ' ').trim();
-    if (!normalized) return;
-    // Skip if normalization destroyed too much of the original title (e.g. CJK → sparse ASCII)
+    // Skip if ASCII normalization destroyed too much of the original title
+    // (e.g. CJK → sparse ASCII). Measured BEFORE punctuation cleaning so the
+    // strip below can't trip the ratio.
     const original = (originalTitle || rawTitle).replace(/\s+/g, '');
     if (original.length > 0 && normalized.length / original.length < 0.8) return;
+    // Strip punctuation the indexer can't match: "&"→"and", apostrophes dropped
+    // ("That's"→"Thats"), slashes/commas/parens/colons/dots → space
+    // ("Love/Hate"→"Love Hate"). Without this a literal title returns 0 hits.
+    normalized = cleanSearchTitle(normalized);
+    if (!normalized) return;
     const withSuffix = alreadyHasSuffix
       ? normalized.trim()
       : appendEpisodeSuffix(normalized, suffixCtx).trim();
