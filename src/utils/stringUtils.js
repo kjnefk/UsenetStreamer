@@ -20,8 +20,8 @@ function sanitizeStrictSearchPhrase(text) {
   return foldAccents(text)
     .replace(/&/g, ' and ')
     // Treat separators — including slash/backslash — as a single space so a
-    // title like "Love/Hate" tokenizes as ["love","hate"] (matching dotted
-    // release names "Love.Hate...") instead of collapsing into "lovehate".
+    // title like "A/B" tokenizes as ["a","b"] (matching dotted release names
+    // "A.B...") instead of collapsing into "ab".
     .replace(/[\.\-_:/\\\s]+/g, ' ')
     // Accents are already folded above, so drop the À-ÿ allowance — any leftover
     // non-ASCII letter is removed, matching the ASCII query sent to indexers.
@@ -32,15 +32,15 @@ function sanitizeStrictSearchPhrase(text) {
 
 // Turn a human/metadata title (e.g. a TMDb title) into the token string we send
 // to indexers/Easynews for a TEXT search. Release names are whitespace/dot
-// separated alphanumerics, so a literal title like
-//   "Earth, Wind & Fire (To Be Celestial vs. That's the Weight of the World)"
+// separated alphanumerics, so a punctuated title like
+//   "A Title, Part 1 & 2 (Director's Cut)"
 // must become
-//   "Earth Wind and Fire To Be Celestial vs Thats the Weight of the World"
+//   "A Title Part 1 and 2 Directors Cut"
 // or the indexer returns nothing. Rules:
 //   - fold accents/umlauts to ASCII (matches how releases spell them)
-//   - apostrophes are REMOVED, not spaced ("That's" → "Thats", not "That s")
-//   - "&" → "and" (so "Wind & Fire" → "Wind and Fire")
-//   - every other punctuation/symbol → space ("Love/Hate" → "Love Hate",
+//   - apostrophes are REMOVED, not spaced ("Director's" → "Directors", not "Director s")
+//   - "&" → "and" (so "1 & 2" → "1 and 2")
+//   - every other punctuation/symbol → space ("A/B" → "A B",
 //     commas, parens, colons, dots, hyphens, music glyphs, …)
 //   - collapse whitespace; case is preserved (indexer text search is
 //     case-insensitive). The result lines up with sanitizeStrictSearchPhrase so

@@ -12,8 +12,8 @@
 //   1. NZB_RELEASE_EXCLUSIONS  → NZB_EXCLUDED_QUALITIES/ENCODES/VISUAL_TAGS/
 //      REGEX_PATTERNS. The old release-type keyword list (cam, telesync, hdtv,
 //      webrip, xvid, 3d, …) was applied as a *title* regex, where a bare "cam"
-//      matched "Off Campus" and dropped every result. Hidden + additive +
-//      buggy. (global + per-profile)
+//      matched any title containing those letters and dropped every result.
+//      Hidden + additive + buggy. (global + per-profile)
 //   2. NZB_MIN_RESULT_SIZE_MB  → NZB_MIN_RESULT_SIZE_GB. The MB knob fed a
 //      *separate, additive* min-size filter that the visible "Min Size (GB)"
 //      field did not override — a stale large MB value silently dropped results

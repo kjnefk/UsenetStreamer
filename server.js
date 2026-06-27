@@ -27,8 +27,8 @@ runtimeEnv.applyRuntimeEnv();
 
 // One-time startup migrations: retire legacy config fields that were dropped
 // from the UI but still applied silently (e.g. NZB_RELEASE_EXCLUSIONS, where a
-// bare "cam" matched "Off Campus" and dropped every result; NZB_MIN_RESULT_
-// SIZE_MB's hidden additive floor). Each folds its value into the current
+// bare term like "cam" matched any title containing those letters and dropped
+// every result; NZB_MIN_RESULT_SIZE_MB's hidden additive floor). Each folds its value into the current
 // visible field and DELETES the legacy key, so it stops applying and never
 // re-migrates. Idempotent: once the keys are gone this is a no-op. Keys
 // supplied solely via Docker/.env are left alone.
@@ -2189,7 +2189,7 @@ async function streamHandler(req, res) {
       const seenPlans = new Set();
       const addPlan = (planType, { tokens = [], rawQuery = null, skipHydra = false } = {}) => {
         // Word-boundary normalization for the text query (q=): slash/backslash in
-        // a title (e.g. "Love/Hate") aren't word boundaries to indexers, so the
+        // a title (e.g. "A/B") aren't word boundaries to indexers, so the
         // literal query misses dotted release names. Treat them as spaces — the
         // single choke point for every text-plan source. (Accents are already
         // ASCII-folded upstream by normalizeToAscii.) This also flows into the
@@ -2428,10 +2428,10 @@ async function streamHandler(req, res) {
             console.log(`${INDEXER_LOG_PREFIX} Skipping year-only text plan (no title)`);
           } else {
             const rawFallback = textQueryCandidate.trim();
-            // Strip punctuation the indexer can't match ("Earth, Wind & Fire
-            // (...)" → "Earth Wind and Fire ..."); the year/SxxEyy suffix is
-            // alphanumeric so it survives. ASCII-normalize first (handles CJK /
-            // transliteration), then clean.
+            // Strip punctuation the indexer can't match ("A, B & C (...)" →
+            // "A B and C ..."); the year/SxxEyy suffix is alphanumeric so it
+            // survives. ASCII-normalize first (handles CJK / transliteration),
+            // then clean.
             textQueryFallbackValue = cleanSearchTitle(tmdbService.normalizeToAscii(rawFallback));
             if (textQueryFallbackValue && textQueryFallbackValue !== rawFallback) {
               console.log(`${INDEXER_LOG_PREFIX} Normalized text query to ASCII`, { original: rawFallback, normalized: textQueryFallbackValue });
@@ -2492,8 +2492,8 @@ async function streamHandler(req, res) {
             }
 
             // Strip punctuation so the query matches release-name tokens
-            // ("Earth, Wind & Fire (...)" → "Earth Wind and Fire ..."); ratio
-            // guard above already ran on the uncleaned title.
+            // ("A, B & C (...)" → "A B and C ..."); ratio guard above already
+            // ran on the uncleaned title.
             let normalizedQuery = cleanSearchTitle(normalizedBase);
             if (!normalizedQuery) return;
             if (type === 'movie' && Number.isFinite(releaseYear)) {
@@ -2657,7 +2657,7 @@ async function streamHandler(req, res) {
           return false;
         }
         // Additional Levenshtein similarity check on parsed titles to reject false positives
-        // e.g. "The Kingdom" vs "The Last Kingdom" pass first/last word but fail similarity
+        // e.g. a short title vs a longer one sharing its first/last word can pass token checks but fail similarity
         const queryParsedTitle = (() => {
           try {
             const parsed = parseReleaseMetadata(plan.query || plan.strictPhrase);
@@ -3152,10 +3152,11 @@ async function streamHandler(req, res) {
         // Legacy "Release Exclusions" (NZB_RELEASE_EXCLUSIONS) are release-TYPE
         // keywords (cam, telesync, hdtv, webrip, xvid, 3d, …), NOT free regex.
         // Match each as a whole token using the same release-name boundary the
-        // classifier uses, so "cam" hits ".CAM." / " CAM " but never "Campus"
-        // ("Off Campus"), "scr" never "subscriber", etc. (Plain-substring
-        // matching here silently dropped legit titles whose name contained a
-        // release-type substring.) Explicit user regex (NZB_EXCLUDED_REGEX_
+        // classifier uses, so "cam" hits ".CAM." / " CAM " but not the "cam"
+        // inside an ordinary word like "camera", and "scr" not inside
+        // "subscriber", etc. (Plain-substring matching here silently dropped
+        // legit titles whose name contained a release-type substring.) Explicit
+        // user regex (NZB_EXCLUDED_REGEX_
         // PATTERNS) is left untouched — those are author-controlled patterns.
         const releaseExclusionToPattern = (term) => {
           const t = String(term || '').trim();

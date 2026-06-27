@@ -60,8 +60,8 @@ function buildEasynewsSearchParams({
     const original = (originalTitle || rawTitle).replace(/\s+/g, '');
     if (original.length > 0 && normalized.length / original.length < 0.8) return;
     // Strip punctuation the indexer can't match: "&"→"and", apostrophes dropped
-    // ("That's"→"Thats"), slashes/commas/parens/colons/dots → space
-    // ("Love/Hate"→"Love Hate"). Without this a literal title returns 0 hits.
+    // ("Director's"→"Directors"), slashes/commas/parens/colons/dots → space
+    // ("A/B"→"A B"). Without this a literal title returns 0 hits.
     normalized = cleanSearchTitle(normalized);
     if (!normalized) return;
     const withSuffix = alreadyHasSuffix

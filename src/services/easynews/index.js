@@ -86,8 +86,8 @@ function sanitizePhrase(text) {
   if (!text) return '';
   const working = foldAccents(text)
     .replace(/&/g, ' and ')
-    // Slash/backslash are word separators (e.g. "Love/Hate" → "love hate"), not
-    // characters to delete — otherwise the phrase collapses to "lovehate" and
+    // Slash/backslash are word separators (e.g. "A/B" → "a b"), not
+    // characters to delete — otherwise the phrase collapses to "ab" and
     // never matches dotted release names. Mirrors sanitizeStrictSearchPhrase.
     .replace(/[\.\-_:/\\\s]+/g, ' ')
     // Accents already folded to ASCII above; drop the À-ÿ allowance.
@@ -133,7 +133,7 @@ function matchesStrict(title, strictPhrase) {
   return true;
 }
 
-// --- Levenshtein-based title similarity (catches false positives like "The Kingdom" vs "The Last Kingdom") ---
+// --- Levenshtein-based title similarity (catches false positives like a short title vs a longer one sharing a word) ---
 
 const TITLE_SIMILARITY_THRESHOLD = 0.85;
 
