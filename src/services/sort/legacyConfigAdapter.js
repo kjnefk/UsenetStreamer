@@ -1,6 +1,11 @@
 // Converts the existing UsenetStreamer config shape into the engine's
 // normalized sort-criteria + preferred-lists form.
 //
+// NOTE: this is a per-request, in-memory ADAPTER — it reads legacy env vars and
+// returns the new config shape on every request. It does NOT write anything and
+// is NOT a one-time migration. (Persistent, run-once migrations that rewrite
+// runtime-env.json live in legacyFieldMigrations.js.)
+//
 // Existing env vars (preserved, source of truth for legacy installs):
 //   NZB_SORT_ORDER             - comma-separated keys (e.g. "language,quality,size,files")
 //                                Treated as the "global" list (default for all types).

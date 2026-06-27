@@ -135,11 +135,20 @@ function getTargetStrings(stream) {
  * Filter a list of streams using the engine's filter config.
  * @param {Array<object>} streams
  * @param {object} filters - { excluded:{resolutions, qualities, ...}, included:{...}, ranges:{size,bitrate,ageHours}, excludedRegex, requiredRegex }
+ * @param {object} [opts] - { dropLog } — if dropLog is an array, each removed
+ *   stream is pushed as { title, reason } so callers can explain a "0 results"
+ *   outcome (which filter dropped everything).
  * @returns {Array<object>} new array
  */
-function filterStreams(streams, filters = {}) {
+function filterStreams(streams, filters = {}, opts = {}) {
   if (!Array.isArray(streams) || streams.length === 0) return streams || [];
   if (!filters || typeof filters !== 'object') return streams;
+
+  const dropLog = Array.isArray(opts.dropLog) ? opts.dropLog : null;
+  const drop = (stream, reason) => {
+    if (dropLog) dropLog.push({ title: stream && (stream.title || stream.Title) || null, reason });
+    return false;
+  };
 
   const excluded = filters.excluded || {};
   const included = filters.included || {};
@@ -177,33 +186,33 @@ function filterStreams(streams, filters = {}) {
     // Scalar excludes (resolution + encode + quality are synonym-aware:
     // '4k'≡'2160p', 'x264'≡'h.264'≡'avc', 'remux'≡'bluray remux'). Release
     // groups have no synonym map.
-    if (scalarInSetWithSynonyms(getStreamResolution(stream), excludedSets.resolutions, RESOLUTION_SYNONYMS)) return false;
-    if (scalarInSetWithSynonyms(getStreamQuality(stream), excludedSets.qualities, QUALITY_SYNONYMS)) return false;
-    if (scalarInSetWithSynonyms(getStreamEncode(stream), excludedSets.encodes, ENCODE_SYNONYMS)) return false;
-    if (scalarInSet(getStreamReleaseGroup(stream), excludedSets.releaseGroups)) return false;
+    if (scalarInSetWithSynonyms(getStreamResolution(stream), excludedSets.resolutions, RESOLUTION_SYNONYMS)) return drop(stream, `excluded:resolution=${getStreamResolution(stream)}`);
+    if (scalarInSetWithSynonyms(getStreamQuality(stream), excludedSets.qualities, QUALITY_SYNONYMS)) return drop(stream, `excluded:quality=${getStreamQuality(stream)}`);
+    if (scalarInSetWithSynonyms(getStreamEncode(stream), excludedSets.encodes, ENCODE_SYNONYMS)) return drop(stream, `excluded:encode=${getStreamEncode(stream)}`);
+    if (scalarInSet(getStreamReleaseGroup(stream), excludedSets.releaseGroups)) return drop(stream, `excluded:releaseGroup=${getStreamReleaseGroup(stream)}`);
 
     // Allowed-Resolutions whitelist (the only "included" filter we support).
     // getStreamResolution returns 'unknown' for missing, so an "unknown" entry
     // in the allowed list keeps undetectable-resolution streams; omitting it
     // drops them — user-controlled via the grid's "unknown" checkbox.
-    if (includedSets.resolutions && !scalarInSetWithSynonyms(getStreamResolution(stream), includedSets.resolutions, RESOLUTION_SYNONYMS)) return false;
+    if (includedSets.resolutions && !scalarInSetWithSynonyms(getStreamResolution(stream), includedSets.resolutions, RESOLUTION_SYNONYMS)) return drop(stream, `notAllowed:resolution=${getStreamResolution(stream)}`);
 
     // List excludes (audioTags, audioChannels, languages are synonym-aware).
-    if (listHasOverlap(getStreamVisualTags(stream), excludedSets.visualTags)) return false;
-    if (listHasOverlapWithSynonyms(getStreamAudioTags(stream), excludedSets.audioTags, AUDIO_SYNONYMS)) return false;
-    if (listHasOverlapWithSynonyms(getStreamAudioChannels(stream), excludedSets.audioChannels, AUDIO_CHANNEL_SYNONYMS)) return false;
-    if (listHasOverlapWithSynonyms(getStreamLanguages(stream), excludedSets.languages, LANGUAGE_SYNONYMS)) return false;
+    if (listHasOverlap(getStreamVisualTags(stream), excludedSets.visualTags)) return drop(stream, 'excluded:visualTag');
+    if (listHasOverlapWithSynonyms(getStreamAudioTags(stream), excludedSets.audioTags, AUDIO_SYNONYMS)) return drop(stream, 'excluded:audioTag');
+    if (listHasOverlapWithSynonyms(getStreamAudioChannels(stream), excludedSets.audioChannels, AUDIO_CHANNEL_SYNONYMS)) return drop(stream, 'excluded:audioChannel');
+    if (listHasOverlapWithSynonyms(getStreamLanguages(stream), excludedSets.languages, LANGUAGE_SYNONYMS)) return drop(stream, `excluded:language=${(getStreamLanguages(stream) || []).join('|')}`);
 
     // Numeric ranges
-    if (!inRange(getStreamSize(stream), ranges.size)) return false;
-    if (!inRange(getStreamBitrate(stream), ranges.bitrate)) return false;
+    if (!inRange(getStreamSize(stream), ranges.size)) return drop(stream, `range:size=${getStreamSize(stream)}`);
+    if (!inRange(getStreamBitrate(stream), ranges.bitrate)) return drop(stream, `range:bitrate=${getStreamBitrate(stream)}`);
     const ageMs = getStreamAgeMs(stream);
     const ageHours = Number.isFinite(ageMs) ? ageMs / 3_600_000 : null;
-    if (!inRange(ageHours, ranges.ageHours)) return false;
+    if (!inRange(ageHours, ranges.ageHours)) return drop(stream, `range:age=${ageHours}`);
 
     // Regex patterns
-    if (excludedRegex.length > 0 && matchesAnyPattern(getTargetStrings(stream), excludedRegex)) return false;
-    if (requiredRegex.length > 0 && !matchesAnyPattern(getTargetStrings(stream), requiredRegex)) return false;
+    if (excludedRegex.length > 0 && matchesAnyPattern(getTargetStrings(stream), excludedRegex)) return drop(stream, 'excludedRegex');
+    if (requiredRegex.length > 0 && !matchesAnyPattern(getTargetStrings(stream), requiredRegex)) return drop(stream, 'requiredRegex');
 
     return true;
   });

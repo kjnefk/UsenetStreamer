@@ -25,6 +25,25 @@ const runtimeEnv = require('./config/runtimeEnv');
 // Apply runtime environment BEFORE loading any services
 runtimeEnv.applyRuntimeEnv();
 
+// One-time startup migrations: retire legacy config fields that were dropped
+// from the UI but still applied silently (e.g. NZB_RELEASE_EXCLUSIONS, where a
+// bare "cam" matched "Off Campus" and dropped every result; NZB_MIN_RESULT_
+// SIZE_MB's hidden additive floor). Each folds its value into the current
+// visible field and DELETES the legacy key, so it stops applying and never
+// re-migrates. Idempotent: once the keys are gone this is a no-op. Keys
+// supplied solely via Docker/.env are left alone.
+try {
+  const { runStartupMigrations } = require('./src/services/sort/legacyFieldMigrations');
+  const migrationUpdates = runStartupMigrations(runtimeEnv.getRuntimeEnv());
+  if (migrationUpdates) {
+    runtimeEnv.updateRuntimeEnv(migrationUpdates);
+    runtimeEnv.applyRuntimeEnv();
+    console.log('[MIGRATION] Retired legacy config fields:', Object.keys(migrationUpdates).join(', '));
+  }
+} catch (err) {
+  console.error('[MIGRATION] Startup field migration failed (continuing):', err && err.message ? err.message : err);
+}
+
 const {
   testIndexerConnection,
   testNzbdavConnection,
@@ -102,7 +121,7 @@ setInterval(() => {
 
 const app = express();
 let currentPort = Number(process.env.PORT || 7000);
-const ADDON_VERSION = '1.8.0';
+const ADDON_VERSION = '1.8.1';
 const DEFAULT_ADDON_NAME = 'UsenetStreamer';
 let serverInstance = null;
 const SERVER_HOST = '0.0.0.0';
@@ -357,14 +376,16 @@ adminApiRouter.post('/config', async (req, res) => {
       } else {
         updates[key] = String(value);
       }
-      // Clearing a proxy must actually REMOVE it. An empty string would be
-      // skipped by applyRuntimeEnv (which deliberately won't overwrite a
-      // non-empty process.env value with '', to protect Docker/.env config), so
-      // a cleared proxy would otherwise only take effect on restart. Deleting
-      // the key unsets it live — while a value supplied solely via Docker/.env
-      // is preserved (it was never an applied runtime-env key). Per-row
-      // NEWZNAB_PROXY_<NN> already null-deletes via the numbered-key path above.
-      if (/(^|_)PROXY$/.test(key) && updates[key] === '') {
+      // Clearing ANY field must REMOVE the key, not persist "". applyRuntimeEnv
+      // deliberately won't overwrite a non-empty process.env value with '' (to
+      // protect Docker/.env config) — so a persisted "" leaves the OLD value
+      // applied until the next restart: the "I cleared the field but it keeps
+      // coming back" bug. Deleting the key instead unsets it live, while a value
+      // supplied solely via Docker/.env is preserved (it was never an applied
+      // runtime-env key). Booleans never reach here as '' (they're 'true'/
+      // 'false'); numbered keys already null-delete via the path above. This
+      // generalizes what used to be a proxy-only fix to every config field.
+      if (updates[key] === '') {
         updates[key] = null;
       }
     }
@@ -373,7 +394,9 @@ adminApiRouter.post('/config', async (req, res) => {
   // Safety: explicitly persist TMDb keys even if ADMIN_CONFIG_KEYS filtering breaks
   if (Object.prototype.hasOwnProperty.call(incoming, 'TMDB_API_KEY')
       && incoming.TMDB_API_KEY !== CREDENTIAL_MASK_SENTINEL) {
-    updates.TMDB_API_KEY = incoming.TMDB_API_KEY ? String(incoming.TMDB_API_KEY) : '';
+    // null (not '') on clear so it unsets live and reverts to any Docker/.env
+    // value — same delete-on-clear rule as the main field loop.
+    updates.TMDB_API_KEY = incoming.TMDB_API_KEY ? String(incoming.TMDB_API_KEY) : null;
   }
 
   // Safety: frozen keys can never be changed via the API — only via env/docker
@@ -382,10 +405,10 @@ adminApiRouter.post('/config', async (req, res) => {
     updates.TMDB_ENABLED = incoming.TMDB_ENABLED ? String(incoming.TMDB_ENABLED) : 'false';
   }
   if (Object.prototype.hasOwnProperty.call(incoming, 'TMDB_SEARCH_LANGUAGES')) {
-    updates.TMDB_SEARCH_LANGUAGES = incoming.TMDB_SEARCH_LANGUAGES ? String(incoming.TMDB_SEARCH_LANGUAGES) : '';
+    updates.TMDB_SEARCH_LANGUAGES = incoming.TMDB_SEARCH_LANGUAGES ? String(incoming.TMDB_SEARCH_LANGUAGES) : null;
   }
   if (Object.prototype.hasOwnProperty.call(incoming, 'TMDB_SEARCH_MODE')) {
-    updates.TMDB_SEARCH_MODE = incoming.TMDB_SEARCH_MODE ? String(incoming.TMDB_SEARCH_MODE) : '';
+    updates.TMDB_SEARCH_MODE = incoming.TMDB_SEARCH_MODE ? String(incoming.TMDB_SEARCH_MODE) : null;
   }
 
   // Debug: log what we're about to save
@@ -3078,7 +3101,7 @@ async function streamHandler(req, res) {
     //   NZB_PREFERRED_* env vars so existing users see unchanged sort output.
     try {
       const { importAioConfig } = require('./src/services/sort/aioImporter');
-      const { buildConfigFromLegacy } = require('./src/services/sort/legacyMigration');
+      const { buildConfigFromLegacy } = require('./src/services/sort/legacyConfigAdapter');
       const { sortStreams } = require('./src/services/sort/sortEngine');
       const { filterStreams } = require('./src/services/sort/filter');
       const { precomputeMatches } = require('./src/services/sort/precompute');
@@ -3117,6 +3140,20 @@ async function streamHandler(req, res) {
 
         const linesFromEnv = (val) => (val || '')
           .toString().split('\n').map((s) => s.trim()).filter(Boolean);
+        // Legacy "Release Exclusions" (NZB_RELEASE_EXCLUSIONS) are release-TYPE
+        // keywords (cam, telesync, hdtv, webrip, xvid, 3d, …), NOT free regex.
+        // Match each as a whole token using the same release-name boundary the
+        // classifier uses, so "cam" hits ".CAM." / " CAM " but never "Campus"
+        // ("Off Campus"), "scr" never "subscriber", etc. (Plain-substring
+        // matching here silently dropped legit titles whose name contained a
+        // release-type substring.) Explicit user regex (NZB_EXCLUDED_REGEX_
+        // PATTERNS) is left untouched — those are author-controlled patterns.
+        const releaseExclusionToPattern = (term) => {
+          const t = String(term || '').trim();
+          if (!t) return null;
+          const escaped = t.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+          return { pattern: `(?<![^\\s\\[(_\\-.,])(${escaped})(?=[\\s\\)\\]_.\\-,]|$)`, flags: 'i' };
+        };
         const filters = {
           excluded: {
             qualities: splitCsvEnv(sortSource.NZB_EXCLUDED_QUALITIES),
@@ -3136,7 +3173,7 @@ async function streamHandler(req, res) {
             bitrate: Object.keys(bitrateRange).length ? bitrateRange : undefined,
           },
           excludedRegex: [
-            ...(Array.isArray(effReleaseExclusions) ? effReleaseExclusions : []),
+            ...(Array.isArray(effReleaseExclusions) ? effReleaseExclusions.map(releaseExclusionToPattern).filter(Boolean) : []),
             ...linesFromEnv(sortSource.NZB_EXCLUDED_REGEX_PATTERNS),
           ],
           requiredRegex: linesFromEnv(sortSource.NZB_REQUIRED_REGEX_PATTERNS),
@@ -3156,7 +3193,21 @@ async function streamHandler(req, res) {
       // have NZB_PREFERRED_KEYWORDS set without `keyword` in their sort order;
       // the old engine treated those as a no-op. Preserving that behavior.
 
-      finalNzbResults = filterStreams(finalNzbResults, unified.filters);
+      const filterInputCount = finalNzbResults.length;
+      const filterDropLog = [];
+      finalNzbResults = filterStreams(finalNzbResults, unified.filters, { dropLog: filterDropLog });
+      // When the filter removes everything (or nearly everything), surface WHY —
+      // otherwise a bare "sorted=0" looks like a coverage failure when it's
+      // really an over-restrictive filter. Group drops by gate + show samples.
+      if (filterInputCount > 0 && finalNzbResults.length === 0 && filterDropLog.length > 0) {
+        const reasonHist = {};
+        for (const d of filterDropLog) {
+          const gate = String(d.reason).split('=')[0];
+          reasonHist[gate] = (reasonHist[gate] || 0) + 1;
+        }
+        console.log(`[SORT][FILTER] dropped ALL ${filterInputCount} results — by gate:`, reasonHist);
+        console.log('[SORT][FILTER] samples:', filterDropLog.slice(0, 5).map((d) => `${d.reason}  ←  ${d.title}`));
+      }
       precomputeMatches(finalNzbResults, {
         preferredKeywordsPatterns: unified.expressions?.keywords || [],
       });
