@@ -110,20 +110,23 @@ async function getImdbIdForSeries(tvdbId) {
 
 async function getTvdbIdForSeries(imdbId) {
   if (!isConfigured() || !imdbId) return null;
+  const id = String(imdbId).trim();
   try {
-    const data = await tvdbRequest('/search', { query: imdbId, type: 'series' });
-    const results = data?.data || data?.data?.results || data?.results || [];
-    const list = Array.isArray(results) ? results : [];
-    const match = list.find((entry) => {
-      const remoteIds = entry.remoteIds || entry.remote_ids || [];
-      const candidates = Array.isArray(remoteIds) ? remoteIds : [];
-      const imdbEntry = candidates.find((rid) => String(rid?.sourceName || rid?.source_name || '').toLowerCase().includes('imdb'));
-      const imdbValue = imdbEntry?.id || imdbEntry?.value || entry.imdbId || entry.imdb_id;
-      return imdbValue && String(imdbValue).trim().toLowerCase() === String(imdbId).trim().toLowerCase();
-    }) || list[0];
-
-    const tvdbId = extractTvdbIdFromSearchResult(match);
-    return tvdbId ? { tvdbId } : null;
+    // Exact remote-ID lookup. The general /search text endpoint does fuzzy TITLE
+    // matching and returns nothing for an IMDb ID string (it only "worked"
+    // when TVDB's search index happened to match embedded remote-IDs) — so
+    // IMDb-only series silently failed to resolve a TVDB ID, which under Strict
+    // ID Matching left the request with an imdbid-only search and no results.
+    // /search/remoteid/{id} is the stable exact-lookup endpoint; each hit wraps
+    // the matched record under series / movie / people / company.
+    const data = await tvdbRequest(`/search/remoteid/${encodeURIComponent(id)}`);
+    const list = Array.isArray(data?.data) ? data.data : [];
+    for (const entry of list) {
+      const series = entry?.series || (entry && entry.type === 'series' ? entry : null);
+      const tvdbId = extractTvdbIdFromSearchResult(series);
+      if (tvdbId) return { tvdbId };
+    }
+    return null;
   } catch (error) {
     console.warn('[TVDB] Failed to resolve TVDB ID from IMDb ID', error.message);
     return null;

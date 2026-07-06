@@ -121,7 +121,7 @@ setInterval(() => {
 
 const app = express();
 let currentPort = Number(process.env.PORT || 7000);
-const ADDON_VERSION = '1.8.1';
+const ADDON_VERSION = '1.8.2';
 const DEFAULT_ADDON_NAME = 'UsenetStreamer';
 let serverInstance = null;
 const SERVER_HOST = '0.0.0.0';
@@ -304,11 +304,12 @@ adminApiRouter.post('/config', async (req, res) => {
       return;
     }
   }
-  // Cross-field: min result size must not exceed max result size.
+  // Cross-field: min result size must not exceed max result size — but a max of
+  // 0 means "no cap" (unlimited), so only enforce this when a real max is set.
   if (incoming.NZB_MIN_RESULT_SIZE_GB && incoming.NZB_MAX_RESULT_SIZE_GB) {
     const mn = Number(incoming.NZB_MIN_RESULT_SIZE_GB);
     const mx = Number(incoming.NZB_MAX_RESULT_SIZE_GB);
-    if (Number.isFinite(mn) && Number.isFinite(mx) && mn > mx) {
+    if (Number.isFinite(mn) && Number.isFinite(mx) && mx > 0 && mn > mx) {
       res.status(400).json({ error: `Min result size (${mn} GB) can't be larger than max result size (${mx} GB).` });
       return;
     }
