@@ -125,11 +125,11 @@ const BUILTIN_NEWZNAB_PRESETS = [
   },
   {
     id: 'scenenzbs',
-    label: 'SceneNZBs (scenenzbs.com)',
-    endpoint: 'https://scenenzbs.com',
+    label: 'SceneNZBs / Treasure-Maps (treasure-maps.com)',
+    endpoint: 'https://treasure-maps.com',
     apiPath: '/api',
-    description: 'Scene-focused indexer. API key from account settings is required.',
-    apiKeyUrl: 'https://scenenzbs.com/profile'
+    description: 'Scene-focused indexer, formerly SceneNZBs (rebranded to Treasure-Maps; same account/API key). API key from account settings is required.',
+    apiKeyUrl: 'https://treasure-maps.com/profile'
   },
   {
     id: 'tabularasa',

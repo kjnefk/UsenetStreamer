@@ -1,23 +1,24 @@
-// One-time, run-once startup migrations that retire legacy config fields.
+// One-time, run-once startup migrations for runtime-env config.
 //
-// Some old config keys were dropped from the admin UI but kept being read by
-// the backend, so their stale values silently affected results with no way for
-// the user to see or clear them. Each migration here folds the legacy value
-// into the current, visible field and then DELETES the legacy key — so it stops
-// applying and never re-migrates (idempotent: once the key is gone it's a
-// no-op). All migrations operate only on keys present in runtime-env.json (so
-// they can be deleted); values supplied solely via Docker/.env are left alone.
+// Some config keys were dropped/renamed but kept being read by the backend, so
+// stale values silently affected results with no way for the user to fix them.
+// Each migration rewrites the affected key(s) in place and is idempotent (once
+// migrated, a re-run is a no-op). All migrations operate only on keys present in
+// runtime-env.json; values supplied solely via Docker/.env are left alone.
 //
-// Covered legacy fields:
+// Covered migrations:
 //   1. NZB_RELEASE_EXCLUSIONS  → NZB_EXCLUDED_QUALITIES/ENCODES/VISUAL_TAGS/
 //      REGEX_PATTERNS. The old release-type keyword list (cam, telesync, hdtv,
 //      webrip, xvid, 3d, …) was applied as a *title* regex, where a bare "cam"
 //      matched any title containing those letters and dropped every result.
-//      Hidden + additive + buggy. (global + per-profile)
+//      Hidden + additive + buggy. Legacy key is then deleted. (global + per-profile)
 //   2. NZB_MIN_RESULT_SIZE_MB  → NZB_MIN_RESULT_SIZE_GB. The MB knob fed a
 //      *separate, additive* min-size filter that the visible "Min Size (GB)"
 //      field did not override — a stale large MB value silently dropped results
-//      with no UI to see/clear it.
+//      with no UI to see/clear it. Legacy key is then deleted.
+//   3. NEWZNAB_ENDPOINT_<NN> scenenzbs.com → treasure-maps.com. The SceneNZBs
+//      indexer rebranded to Treasure-Maps (same account/API key, new domain);
+//      rewrite already-configured endpoints so they keep working.
 
 const { PARSE_REGEX, matchPattern, matchMultiplePatterns } = require('../metadata/releaseClassifier');
 
@@ -157,6 +158,24 @@ function migrateMinResultSize(values) {
   return updates;
 }
 
+// --- SceneNZBs → Treasure-Maps endpoint rename -----------------------------
+// The SceneNZBs indexer rebranded to Treasure-Maps: same backend and API key,
+// only the domain changed (scenenzbs.com → treasure-maps.com). Rewrite any
+// configured NEWZNAB_ENDPOINT_<NN> pointing at the old host so already-set
+// indexers keep working without re-adding them. The API key / path and the
+// display name are left untouched (the strict-match special-case matches both
+// names). Docker/.env-set endpoints can't be rewritten from here.
+function migrateSceneNzbsEndpoint(values) {
+  const updates = {};
+  for (const key of Object.keys(values)) {
+    if (!/^NEWZNAB_ENDPOINT_\d+$/.test(key)) continue;
+    const val = String(values[key] || '');
+    const rewritten = val.replace(/(?:www\.)?scenenzbs\.com/gi, 'treasure-maps.com');
+    if (rewritten !== val) updates[key] = rewritten;
+  }
+  return Object.keys(updates).length ? updates : null;
+}
+
 /**
  * Run every startup migration and return a single combined runtime-env update
  * patch (null deletes a key), or null if nothing needs migrating. Each migration
@@ -168,7 +187,7 @@ function runStartupMigrations(values) {
   if (!values || typeof values !== 'object') return null;
   const updates = {};
   let changed = false;
-  for (const migrate of [migrateReleaseExclusions, migrateMinResultSize]) {
+  for (const migrate of [migrateReleaseExclusions, migrateMinResultSize, migrateSceneNzbsEndpoint]) {
     const patch = migrate(values);
     if (patch && Object.keys(patch).length) {
       Object.assign(updates, patch);
@@ -182,6 +201,7 @@ module.exports = {
   runStartupMigrations,
   migrateReleaseExclusions,
   migrateMinResultSize,
+  migrateSceneNzbsEndpoint,
   classifyTerm,
   boundedRegexLiteral,
 };

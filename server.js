@@ -2622,7 +2622,10 @@ async function streamHandler(req, res) {
 
       const resultMatchesStrictPlan = (plan, item) => {
         const isTvdbPlan = Array.isArray(plan?.tokens) && plan.tokens.some(t => /^\{TvdbId:/i.test(t));
-        const isSceneNzbs = String(item?.indexerId || item?.indexer || '').toLowerCase().includes('scenenzbs');
+        // SceneNZBs rebranded to Treasure-Maps — match either name (some users
+        // still carry the old display name, new adds use the new one).
+        const idxName = String(item?.indexerId || item?.indexer || '').toLowerCase();
+        const isSceneNzbs = idxName.includes('scenenzbs') || /treasure[\s-]?maps/.test(idxName);
         if (isTvdbPlan && isSceneNzbs && type === 'series' && Number.isFinite(seasonNum) && Number.isFinite(episodeNum)) {
           const annotated = (item?.season !== undefined || item?.episode !== undefined) ? item : annotateNzbResult(item, 0);
           if (Number(annotated?.season) !== Number(seasonNum) || Number(annotated?.episode) !== Number(episodeNum)) return false;
