@@ -9,6 +9,8 @@ const EASYNEWS_SEARCH_STANDALONE_TIMEOUT_MS = 7000;
 const EASYNEWS_NZB_DOWNLOAD_TIMEOUT_MS = 30000;
 const DEFAULT_MIN_SIZE_MB = 100;
 const MAX_RESULTS_PER_PAGE = 250;
+const DEFAULT_MAX_PAGES = 10;
+const DEFAULT_TOTAL_MAX_RESULTS = 500;
 const TOKEN_SPLIT_REGEX = /[^\w]+/gu;
 const STOPWORDS = new Set(['the', 'a', 'an', 'and', 'of', 'in', 'for', 'on']);
 const QUALITY_REGEX = /(4320|2160|1440|1080|720|576|540|480|360)\s*(p|i)?/i;
@@ -20,11 +22,21 @@ const ALLOWED_VIDEO_EXTENSIONS = new Set(['.mkv', '.mp4', '.m4v', '.avi', '.ts',
 const EASYNEWS_INDEXER_ID = 'easynews';
 const EASYNEWS_INDEXER_NAME = 'Easynews';
 
+// FIX (#4): previously validateStatus allowed 2xx-4xx through and let axios
+// throw its own uncaught AxiosError for 5xx. We now accept every status
+// ourselves so 5xx responses can be retried instead of blowing up the whole
+// search.
 const httpClient = axios.create({
   baseURL: EASYNEWS_BASE_URL,
   timeout: DEFAULT_TIMEOUT_MS,
-  validateStatus: (status) => status >= 200 && status < 500,
+  validateStatus: () => true,
 });
+
+// Retry/backoff tuning for transient failures.
+const EMPTY_RESPONSE_RETRIES = 1;
+const EMPTY_RESPONSE_RETRY_DELAY_MS = 500;
+const SERVER_ERROR_RETRIES = 2;
+const SERVER_ERROR_RETRY_BACKOFF_MS = 750;
 
 let EASYNEWS_ENABLED = false;
 let EASYNEWS_USERNAME = '';
@@ -33,6 +45,13 @@ let EASYNEWS_MIN_SIZE_BYTES = DEFAULT_MIN_SIZE_MB * 1024 * 1024;
 let EASYNEWS_DOWNLOAD_BASE = '';
 let EASYNEWS_SHARED_SECRET = '';
 let EASYNEWS_SAFE_TEXT_MODE = false;
+// FIX (#3): pagination limits, configurable the same way EASYNEWS_MIN_SIZE_MB is.
+let EASYNEWS_MAX_PAGES = DEFAULT_MAX_PAGES;
+let EASYNEWS_TOTAL_MAX_RESULTS = DEFAULT_TOTAL_MAX_RESULTS;
+
+function sleep(ms) {
+  return new Promise((resolve) => setTimeout(resolve, ms));
+}
 
 function resolveDownloadBase(rawBase) {
   const trimmed = stripTrailingSlashes(rawBase || '');
@@ -51,6 +70,12 @@ function reloadConfig({ addonBaseUrl, sharedSecret } = {}) {
   } else {
     EASYNEWS_MIN_SIZE_BYTES = DEFAULT_MIN_SIZE_MB * 1024 * 1024;
   }
+  const maxPages = Number(process.env.EASYNEWS_MAX_PAGES);
+  EASYNEWS_MAX_PAGES = Number.isFinite(maxPages) && maxPages >= 1 ? maxPages : DEFAULT_MAX_PAGES;
+  const totalMaxResults = Number(process.env.EASYNEWS_TOTAL_MAX_RESULTS);
+  EASYNEWS_TOTAL_MAX_RESULTS = Number.isFinite(totalMaxResults) && totalMaxResults >= 1
+    ? totalMaxResults
+    : DEFAULT_TOTAL_MAX_RESULTS;
   EASYNEWS_DOWNLOAD_BASE = resolveDownloadBase(addonBaseUrl);
   EASYNEWS_SHARED_SECRET = sharedSecret || '';
   EASYNEWS_SAFE_TEXT_MODE = toBoolean(process.env.EASYNEWS_TEXT_MODE_ONLY, false);
@@ -278,8 +303,19 @@ function extractReleaseMarkers(text, qualityHint) {
   return info;
 }
 
+// FIX (#2): extensions coming back from Easynews aren't guaranteed to
+// include the leading dot, but DISALLOWED_EXTENSIONS/ALLOWED_VIDEO_EXTENSIONS
+// are both keyed with one. Without this normalization, an un-dotted
+// extension value fails the allow-list check for every single item and
+// isFlaggedItem() silently discards otherwise-valid video files.
+function normalizeExtension(ext) {
+  if (!ext) return '';
+  const trimmed = String(ext).trim().toLowerCase();
+  return trimmed.startsWith('.') ? trimmed : `.${trimmed}`;
+}
+
 function isFlaggedItem(raw, ext, durationSeconds) {
-  const extension = (ext || '').toLowerCase();
+  const extension = normalizeExtension(ext);
   if (DISALLOWED_EXTENSIONS.has(extension)) return true;
   if (extension && !ALLOWED_VIDEO_EXTENSIONS.has(extension)) return true;
   if (durationSeconds !== null && durationSeconds < 60) return true;
@@ -288,6 +324,21 @@ function isFlaggedItem(raw, ext, durationSeconds) {
   const type = (raw?.type || raw?.file_type || '').toUpperCase();
   if (type && type !== 'VIDEO') return true;
   return false;
+}
+
+// FIX (#5): the previous /sample/i.test(title) matched "sample" ANYWHERE in
+// the title, including as a substring of an unrelated word or a group tag,
+// which could wrongly discard legitimate releases. This only flags a sample
+// when "sample" appears in the second half of the filename, matching the
+// heuristic used elsewhere in this codebase and avoiding false positives on
+// titles that merely start with the word (e.g. "Sample.Movie.Title.2020.mkv").
+function isSampleTitle(filenameNoExt, title) {
+  const text = filenameNoExt || title || '';
+  if (!text) return false;
+  const lower = text.toLowerCase();
+  const idx = lower.indexOf('sample');
+  if (idx < 0) return false;
+  return idx >= Math.floor(text.length / 2);
 }
 
 function buildTitle({ displayFn, filenameNoExt, ext, subject }) {
@@ -378,6 +429,7 @@ function filterAndMap(jsonData, options) {
   const thumbBase = jsonData?.thumbURL || jsonData?.thumbUrl || null;
   const items = [];
   const data = Array.isArray(jsonData?.data) ? jsonData.data : [];
+  const seenHashes = new Set();
 
   data.forEach((entry) => {
     let hashId;
@@ -399,12 +451,24 @@ function filterAndMap(jsonData, options) {
       subject = entry[6];
       filenameNoExt = entry[10];
       ext = entry[11];
+      // FIX (#1): `size` was never assigned in this branch, so it stayed at
+      // the outer `let size = 0;` default and every array-form item failed
+      // the `sizeValue < minBytes` check below, silently dropping ALL
+      // results whenever Easynews answers with the legacy array format.
+      size = entry[4] || 0;
       poster = entry[7];
-      postedRaw = entry[5]; // Post Date field (e.g. "08-01-2019 12:11:24")
+      // FIX: index 8 holds the post timestamp; index 5 does not (that
+      // mismatch meant posted/age were computed from the wrong field for
+      // every array-form result).
+      postedRaw = entry[8];
       durationRaw = entry[14];
       usenetGroup = entry[9];
     } else if (entry && typeof entry === 'object') {
-      hashId = entry.hash || entry['0'] || entry.id;
+      // FIX (#7): no longer falls back to entry.id. `id` is a short
+      // filename-disambiguation suffix, not the content hash, so using it
+      // as a hash substitute would corrupt any hash-based dedup/lookup for
+      // items that happen to be missing `hash`/`'0'`.
+      hashId = entry.hash || entry['0'];
       subject = entry.subject || entry['6'];
       filenameNoExt = entry.filename || entry['10'];
       ext = entry.ext || entry['11'];
@@ -420,6 +484,12 @@ function filterAndMap(jsonData, options) {
     }
 
     if (!hashId) return;
+
+    // Cross-page/duplicate protection (relevant now that filterAndMap may
+    // receive aggregated multi-page data from fetchAllSearchResults).
+    if (seenHashes.has(hashId)) return;
+    seenHashes.add(hashId);
+
     const normalizedExt = extensionField || ext || '';
     const sizeValue = Number(size);
     if (!Number.isFinite(sizeValue) || sizeValue < minBytes) return;
@@ -430,7 +500,7 @@ function filterAndMap(jsonData, options) {
     const title = buildTitle({ displayFn, filenameNoExt, ext: normalizedExt, subject });
     const quality = extractQuality(title) || extractQuality(fullres);
     const titleMeta = extractReleaseMarkers(title, quality);
-    if (skipSamples && /sample/i.test(title)) {
+    if (skipSamples && isSampleTitle(filenameNoExt, title)) {
       return;
     }
 
@@ -476,43 +546,24 @@ function filterAndMap(jsonData, options) {
       const parsedSeason = Array.isArray(parsedRelease?.seasons) ? parsedRelease.seasons[0] : null;
       const parsedEpisode = Array.isArray(parsedRelease?.episodes) ? parsedRelease.episodes[0] : null;
 
-      const isSeries = Boolean(queryMeta?.season);
-      if (queryMeta?.year && isSeries) {
-        // Series: only reject if the NZB has a year AND it mismatches (±1 tolerance)
-        if (parsedYear && Math.abs(queryMeta.year - parsedYear) > 1) {
-          if (debugEnabled) {
-            console.log('[EASYNEWS] Strict match failed (series year mismatch)', {
-              title,
-              parsedTitle: parsedCandidateTitle,
-              year: parsedYear,
-              expectedYear: queryMeta.year,
-            });
-          }
-          return;
+      // FIX (#6): previously movies were held to a stricter standard than
+      // series — a movie candidate with NO parseable year was hard-rejected,
+      // even though a missing year is inconclusive, not a mismatch. That
+      // caused false negatives whenever parseTorrentTitle couldn't extract a
+      // year (common for stylized/foreign-language/unusually-tagged
+      // releases). Both movies and series now only reject on an ACTUAL
+      // mismatch (a parsed year that differs from the query by more than 1
+      // year); a missing parsed year no longer disqualifies a candidate.
+      if (queryMeta?.year && parsedYear && Math.abs(queryMeta.year - parsedYear) > 1) {
+        if (debugEnabled) {
+          console.log('[EASYNEWS] Strict match failed (year mismatch)', {
+            title,
+            parsedTitle: parsedCandidateTitle,
+            year: parsedYear,
+            expectedYear: queryMeta.year,
+          });
         }
-      } else if (queryMeta?.year) {
-        // Movie: strict year match required
-        if (!parsedYear) {
-          if (debugEnabled) {
-            console.log('[EASYNEWS] Strict match failed (missing year)', {
-              title,
-              parsedTitle: parsedCandidateTitle,
-              expectedYear: queryMeta.year,
-            });
-          }
-          return;
-        }
-        if (Math.abs(queryMeta.year - parsedYear) > 1) {
-          if (debugEnabled) {
-            console.log('[EASYNEWS] Strict match failed (year mismatch)', {
-              title,
-              parsedTitle: parsedCandidateTitle,
-              year: parsedYear,
-              expectedYear: queryMeta.year,
-            });
-          }
-          return;
-        }
+        return;
       }
       if (queryMeta?.season && parsedSeason && queryMeta.season !== parsedSeason) {
         if (debugEnabled) {
@@ -567,7 +618,7 @@ function filterAndMap(jsonData, options) {
     items.push({
       hash: hashId,
       filename: filenameNoExt || hashId,
-      ext: normalizedExt.startsWith('.') ? normalizedExt : `.${normalizedExt}`,
+      ext: normalizeExtension(normalizedExt),
       sig,
       size: sizeValue,
       title,
@@ -587,12 +638,12 @@ function filterAndMap(jsonData, options) {
   return items;
 }
 
-async function fetchSearchResults(query, authOverride = null) {
+function buildSearchParams(query, pageNr, perPage) {
   const params = new URLSearchParams();
   params.set('fly', '2');
   params.set('sb', '1');
-  params.set('pno', '1');
-  params.set('pby', String(MAX_RESULTS_PER_PAGE));
+  params.set('pno', String(pageNr));
+  params.set('pby', String(perPage));
   params.set('u', '1');
   params.set('chxu', '1');
   params.set('chxgx', '1');
@@ -603,16 +654,120 @@ async function fetchSearchResults(query, authOverride = null) {
   params.set('s1', 'relevance');
   params.set('s1d', '-');
   params.append('fty[]', 'VIDEO');
+  return params;
+}
 
-  const requestUrl = `/2.0/search/solr-search/?${params.toString()}`;
-  const response = await httpClient.get(requestUrl, buildAuthConfig(authOverride));
-  if (response.status === 401 || response.status === 403) {
-    throw new Error('Easynews rejected credentials');
+// FIX (#4): single-page fetch now retries transient failures instead of
+// either throwing an uncaught AxiosError (5xx) or silently returning `{}`
+// (empty body) with no indication anything went wrong.
+async function fetchSearchResultsPage(query, pageNr, perPage, authOverride = null) {
+  const requestUrl = `/2.0/search/solr-search/?${buildSearchParams(query, pageNr, perPage).toString()}`;
+  const maxAttempts = 1 + EMPTY_RESPONSE_RETRIES + SERVER_ERROR_RETRIES;
+  let lastError = null;
+
+  for (let attempt = 0; attempt < maxAttempts; attempt += 1) {
+    let response;
+    try {
+      response = await httpClient.get(requestUrl, buildAuthConfig(authOverride));
+    } catch (error) {
+      // Network-level failure (DNS, connection reset, client timeout, etc.)
+      lastError = error;
+      if (attempt < maxAttempts - 1) {
+        await sleep(SERVER_ERROR_RETRY_BACKOFF_MS * (attempt + 1));
+        continue;
+      }
+      throw error;
+    }
+
+    if (response.status === 401 || response.status === 403) {
+      throw new Error('Easynews rejected credentials');
+    }
+
+    if (response.status >= 500) {
+      lastError = new Error(`Easynews search failed with status ${response.status}`);
+      if (attempt < maxAttempts - 1) {
+        await sleep(SERVER_ERROR_RETRY_BACKOFF_MS * (attempt + 1));
+        continue;
+      }
+      throw lastError;
+    }
+
+    if (response.status >= 400) {
+      throw new Error(`Easynews search failed with status ${response.status}`);
+    }
+
+    const body = response.data;
+    const hasData = body && typeof body === 'object' && Array.isArray(body.data);
+    if (!hasData) {
+      // Easynews occasionally returns a blank/malformed body even for a
+      // well-formed, successful request. Retry a couple of times before
+      // giving up and treating it as "no results" rather than throwing.
+      if (attempt < maxAttempts - 1) {
+        await sleep(EMPTY_RESPONSE_RETRY_DELAY_MS);
+        continue;
+      }
+      return {};
+    }
+
+    return body;
   }
-  if (response.status >= 400) {
-    throw new Error(`Easynews search failed with status ${response.status}`);
+
+  if (lastError) throw lastError;
+  return {};
+}
+
+// Backwards-compatible single-page fetch (page 1 only), kept for callers
+// like testEasynewsCredentials that just need a quick sanity check.
+async function fetchSearchResults(query, authOverride = null) {
+  return fetchSearchResultsPage(query, 1, MAX_RESULTS_PER_PAGE, authOverride);
+}
+
+// FIX (#3): the old code only ever requested page 1 (capped at 250 results),
+// so anything beyond that was never retrieved no matter how many results
+// Easynews actually had. This fetches page 1 to learn the true page count,
+// then fetches the remaining pages (bounded by EASYNEWS_MAX_PAGES /
+// EASYNEWS_TOTAL_MAX_RESULTS) concurrently, deduplicating by hash.
+async function fetchAllSearchResults(query, authOverride = null) {
+  const perPage = MAX_RESULTS_PER_PAGE;
+  const maxPages = EASYNEWS_MAX_PAGES;
+  const totalMax = EASYNEWS_TOTAL_MAX_RESULTS;
+
+  const firstPage = await fetchSearchResultsPage(query, 1, perPage, authOverride);
+  const firstData = Array.isArray(firstPage.data) ? firstPage.data : [];
+  const aggregated = [...firstData];
+  const seenHashes = new Set(
+    aggregated
+      .map((entry) => (Array.isArray(entry) ? entry[0] : entry?.hash || entry?.['0']))
+      .filter(Boolean)
+  );
+
+  const numPages = Number(firstPage.numPages) || 1;
+  const pagesToFetch = Math.min(numPages, maxPages);
+
+  if (pagesToFetch > 1 && aggregated.length < totalMax) {
+    const remainingPages = [];
+    for (let p = 2; p <= pagesToFetch; p += 1) remainingPages.push(p);
+
+    const pageResults = await Promise.allSettled(
+      remainingPages.map((p) => fetchSearchResultsPage(query, p, perPage, authOverride))
+    );
+
+    for (const result of pageResults) {
+      if (result.status !== 'fulfilled') continue;
+      const pageData = Array.isArray(result.value?.data) ? result.value.data : [];
+      for (const entry of pageData) {
+        if (aggregated.length >= totalMax) break;
+        const hashId = Array.isArray(entry) ? entry[0] : entry?.hash || entry?.['0'];
+        if (hashId) {
+          if (seenHashes.has(hashId)) continue;
+          seenHashes.add(hashId);
+        }
+        aggregated.push(entry);
+      }
+    }
   }
-  return response.data || {};
+
+  return { ...firstPage, data: aggregated.slice(0, totalMax) };
 }
 
 function buildQueryMeta({ rawQuery, year, season, episode }) {
@@ -683,7 +838,8 @@ async function searchEasynews(options = {}) {
   const queryTokens = strict ? tokenize(query) : [];
   const queryMeta = strict ? buildQueryMeta({ rawQuery: query, year, season, episode }) : null;
   const minBytes = EASYNEWS_MIN_SIZE_BYTES;
-  const data = await fetchSearchResults(query);
+  // FIX (#3): use the paginating aggregator instead of a single page.
+  const data = await fetchAllSearchResults(query);
   const mapped = filterAndMap(data, {
     minBytes,
     queryTokens,
